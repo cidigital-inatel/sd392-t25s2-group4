@@ -77,7 +77,9 @@ Gestão e documentação inicial:
 
 - [ ] `[GES]` Preencher o plano de trabalho: nomes dos três membros, orientador, colaboradores, parágrafo "situação preliminar já alcançada", link do repositório.
 - [ ] `[GES]` M1.3 · Matriz de responsabilidades e dependências (a tabela acima, ajustada), aprovada pelos três.
-- [ ] `[GES]` Criar o repositório no GitHub (decisão do autor: ao chegar na máquina em que o projeto vai continuar), com as pastas `rtl/`, `tb/`, `model/`, `sw/`, `docs/`. Combinar entre os membros a convenção de commits, tags e issues (proposta em `docs/convencoes.md`).
+- [x] `[GES]` Criar o repositório no GitHub, com as pastas `rtl/`, `tb/`, `model/`, `sw/`, `docs/`: `https://github.com/lucaslaress/riscv-rv32imac-ci-digital` (privado).
+- [ ] `[GES]` Convidar os membros B e C como colaboradores do repositório.
+- [ ] `[GES]` Combinar entre os membros a convenção de commits, tags e issues (proposta em `docs/convencoes.md`).
 - [x] `[DOC]` Criar `docs/decisoes.md` com três tabelas: decisões tomadas, riscos (copiar a tabela 7.4 do plano e acompanhar) e mudanças de escopo.
 - [x] `[DOC]` M5.1 · README na raiz e um README curto em cada pasta (`rtl/`, `tb/`, `model/`, `sw/`) dizendo o que vai ali.
 

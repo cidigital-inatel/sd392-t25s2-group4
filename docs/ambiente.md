@@ -10,6 +10,7 @@ Como preparar uma máquina do zero para trabalhar no projeto. Siga as seções n
 |---|---|
 | Sistema | Windows 10 ou 11 com WSL 2, ou Linux nativo. Os comandos abaixo assumem Ubuntu 24.04 (no WSL ou nativo). |
 | Editor | VS Code, de preferência com a extensão WSL para abrir a pasta do projeto dentro do Ubuntu. |
+| Git | No Windows, Git for Windows (git-scm.com), para clonar o repositório. Ele traz o gerenciador de credenciais, que abre o navegador no primeiro acesso ao GitHub. Em Linux nativo, o `git` do sistema. |
 | Disco | Cerca de 15 GB livres no Linux (toolchain, Spike, simuladores e ambiente Python). |
 | Rede | Acesso à internet para os downloads. |
 
@@ -25,7 +26,7 @@ wsl --install -d Ubuntu-24.04
 
 Reinicie o Windows, abra "Ubuntu" no menu Iniciar e crie o usuário e a senha.
 
-Daqui em diante, todos os comandos deste guia são digitados no terminal do Ubuntu, não no PowerShell: comandos como `sudo` e `apt` só existem no Ubuntu. O terminal do Ubuntu é reconhecido pelo começo da linha, no formato `usuario@maquina:~$`. Para entrar nele a partir do PowerShell ou do terminal do VS Code, use `wsl -d Ubuntu-24.04` (o nome da distribuição aparece em `wsl -l -v`); para sair, `exit`. A senha pedida pelo `sudo` é a do usuário do Ubuntu, e nada aparece na tela enquanto ela é digitada.
+Daqui em diante, salvo quando a seção disser o contrário, os comandos deste guia são digitados no terminal do Ubuntu, não no PowerShell: comandos como `sudo` e `apt` só existem no Ubuntu. O terminal do Ubuntu é reconhecido pelo começo da linha, no formato `usuario@maquina:~$`. Para entrar nele a partir do PowerShell ou do terminal do VS Code, use `wsl -d Ubuntu-24.04` (o nome da distribuição aparece em `wsl -l -v`); para sair, `exit`. A senha pedida pelo `sudo` é a do usuário do Ubuntu, e nada aparece na tela enquanto ela é digitada.
 
 No terminal do Ubuntu, instale os pacotes básicos de compilação:
 
@@ -47,9 +48,34 @@ A primeira linha deve mostrar `Ubuntu 24.04`; as demais devem responder com uma 
 
 ## 3. Pasta do projeto
 
-Enquanto o repositório no GitHub não existir, copie a pasta `projeto_ci_digital` inteira para a máquina nova; depois, basta clonar. Arquivos de configuração pessoal de editores e ferramentas ficam fora do repositório, pelo `.gitignore`.
+O projeto fica no GitHub, em um repositório privado: `https://github.com/lucaslaress/riscv-rv32imac-ci-digital`. Antes de clonar, aceite o convite de colaborador que chega por e-mail.
 
-Uma pasta do Windows como `C:\...\projeto_ci_digital` aparece no Ubuntu em `/mnt/c/.../projeto_ci_digital`. Compilações e simulações longas ficam mais rápidas se a pasta estiver dentro do sistema de arquivos do Ubuntu (por exemplo `~/projeto_ci_digital`); nesse caso, abra-a no VS Code pela extensão WSL.
+Esta seção é a exceção à regra da seção 2: os comandos abaixo são digitados no PowerShell, dentro da pasta do Windows em que o projeto vai ficar.
+
+```
+git clone https://github.com/lucaslaress/riscv-rv32imac-ci-digital.git
+cd riscv-rv32imac-ci-digital
+```
+
+No primeiro acesso, o gerenciador de credenciais do Git for Windows abre o navegador para o login no GitHub. Se o git nunca foi usado nesta máquina, registre também quem assina os commits:
+
+```
+git config --global user.name "Seu Nome"
+git config --global user.email "seu-email-do-github"
+```
+
+Verificação:
+
+```
+git status
+git log --oneline -n 1
+```
+
+O primeiro comando deve responder `On branch main` e `nothing to commit, working tree clean`; o segundo mostra o commit mais recente.
+
+Arquivos gerados e arquivos de configuração pessoal de editores e ferramentas ficam fora do repositório, pelo `.gitignore`.
+
+Uma pasta do Windows como `C:\...\riscv-rv32imac-ci-digital` aparece no Ubuntu em `/mnt/c/.../riscv-rv32imac-ci-digital`. Compilações e simulações longas ficam mais rápidas se a pasta estiver dentro do sistema de arquivos do Ubuntu (por exemplo `~/riscv-rv32imac-ci-digital`). Nesse caso, o clone é feito no terminal do Ubuntu, o git de lá precisa de autenticação no GitHub configurada à parte, e a pasta é aberta no VS Code pela extensão WSL.
 
 ## 4. Toolchain RISC-V: xPack GNU RISC-V Embedded GCC 15.2.0-1
 
