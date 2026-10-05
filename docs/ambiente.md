@@ -156,15 +156,19 @@ mkdir -p ~/opt/src
 cd ~/opt/src
 git clone https://github.com/riscv-software-src/riscv-isa-sim.git
 cd riscv-isa-sim
-git log -1 --format=%H
+git checkout 609dbe0b9994154833039209fa37151e7c05e9d4
 mkdir build
 cd build
 ../configure --prefix=$HOME/opt/spike
-make -j$(nproc)
+make -j4
 make install
 ```
 
-Anote o resultado de `git log -1 --format=%H` (o commit usado) na tabela de versões da seção 9, para que outra máquina compile exatamente a mesma versão (`git checkout <commit>` antes de `mkdir build`).
+O `git checkout` fixa o commit usado pela equipe, de 01/10/2026, para que as três máquinas compilem exatamente a mesma versão. Se a equipe mudar de commit, ele é atualizado aqui e na tabela da seção 9.
+
+O `-j4` compila quatro arquivos em paralelo, e cada compilação usa algumas centenas de MB de memória. O WSL entrega ao Ubuntu, por padrão, metade da memória da máquina: com cerca de 4 GB no Ubuntu, quatro em paralelo cabem, e a compilação leva cerca de 10 minutos. Com mais memória, `make -j$(nproc)` é mais rápido. Se a compilação parar com a mensagem `Killed`, faltou memória: rode `make -j2`, que ela continua de onde parou. Para ver a memória disponível, use `free -m`.
+
+A instalação ocupa 1,8 GB em `~/opt/spike`. O código-fonte com os arquivos de compilação ocupa 3,9 GB em `~/opt/src/riscv-isa-sim` e pode ser apagado depois do `make install`.
 
 PATH: acrescente esta linha ao `~/.bashrc`, no mesmo lugar da linha do toolchain (antes do bloco de shell interativo):
 
@@ -179,7 +183,7 @@ which spike
 spike --help 2>&1 | head -n 1
 ```
 
-Resultados esperados: o caminho dentro de `~/opt/spike/bin` e uma linha `Spike RISC-V ISA Simulator ...`.
+Resultados esperados: o caminho dentro de `~/opt/spike/bin` e a linha `Spike RISC-V ISA Simulator 1.1.1-dev`.
 
 Observação importante para o projeto: o Spike reserva o endereço `0x1000` para o seu boot ROM e usa `0x8000_0000` como início da memória padrão. Os programas do projeto são ligados em `0x0000_0000`, então, para rodar no Spike, precisam ser religados em `0x8000_0000` (a decisão de como fazer isso é um item da etapa M4.1 no `checklist.md`). A opção `--isa=rv32imac_zicsr` seleciona o conjunto de instruções do projeto.
 
@@ -231,7 +235,7 @@ O Cadence Xcelium é o simulador comercial em que roda o ambiente UVM (etapa M3.
 |---|---|
 | Ubuntu | 24.04 |
 | xPack GNU RISC-V Embedded GCC | 15.2.0-1 (gcc 15.2.0, binutils 2.45, gdb 16.3) |
-| Verilator / Icarus Verilog | a preencher |
-| Spike | a preencher (commit) |
+| Verilator / Icarus Verilog / GTKWave | 5.020 / 12.0 / 3.3.116 (pacotes do Ubuntu 24.04) |
+| Spike | 1.1.1-dev, commit `609dbe0b9994154833039209fa37151e7c05e9d4` (01/10/2026) |
 | Python / PyTorch / torchvision / NumPy | a preencher |
 | Xcelium / UVM | a preencher |

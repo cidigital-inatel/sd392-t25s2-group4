@@ -70,8 +70,8 @@ Ambiente de cada membro (repetir em cada máquina seguindo `docs/ambiente.md`):
 - [ ] `[SW]` Membros B e C instalam o mesmo ambiente nas suas máquinas.
 - [ ] `[VER]` Confirmar o acesso à máquina remota do Xcelium: host, usuário, licença, versão do Xcelium e da UVM. Rodar um exemplo mínimo com `xrun` para provar que compila e simula SystemVerilog com UVM. Registrar em `docs/ambiente.md` (seção 8). O plano exige isso nas semanas 1 e 2.
 - [ ] `[VER]` Definir como o projeto chega à máquina remota (repositório, `scp` ou `rsync`) e testar o caminho de ida e volta.
-- [ ] `[SW]` Instalar dependências de compilação do Spike no WSL (`sudo apt install autoconf automake libtool device-tree-compiler libboost-dev libboost-regex-dev libboost-system-dev`), clonar `riscv-isa-sim`, compilar e instalar em `~/opt/spike`; fixar o commit e registrar em `docs/ambiente.md`.
-- [ ] `[RTL]` Instalar Verilator e Icarus Verilog no WSL (`sudo apt install verilator iverilog gtkwave`) para simulação rápida local sem UVM; registrar versões.
+- [x] `[SW]` Instalar dependências de compilação do Spike no WSL (`sudo apt install autoconf automake libtool device-tree-compiler libboost-dev libboost-regex-dev libboost-system-dev`), clonar `riscv-isa-sim`, compilar e instalar em `~/opt/spike`; fixar o commit e registrar em `docs/ambiente.md`.
+- [x] `[RTL]` Instalar Verilator e Icarus Verilog no WSL (`sudo apt install verilator iverilog gtkwave`) para simulação rápida local sem UVM; registrar versões.
 
 Gestão e documentação inicial:
 
