@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-10-07. Situação: rascunho, versão 0.1, não aprovada.
+Última atualização: 2026-10-07. Situação: rascunho, versão 0.3, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -19,15 +19,51 @@ A decidir:
 
 ## 2. Mapa de memória e periféricos
 
-Endereço base, tamanho e tipo de acesso permitido de cada região: memória de instruções (IMEM), memória de dados (DMEM) e periféricos. Para cada periférico, o endereço, a largura, o sentido (leitura, escrita ou ambos) e a semântica de cada registrador: console, `tohost` e espelhos dos contadores. Comportamento de acessos fora das regiões mapeadas.
+O endereço de 32 bits é decodificado pelos quatro bits mais altos, `addr[31:28]`, que escolhem a região. Dentro da região, os bits baixos endereçam a palavra; quantos bits são usados depende do tamanho configurado (seção 12).
+
+| Região | `addr[31:28]` | Base | Tamanho padrão | Porta | Acesso |
+|---|---|---|---|---|---|
+| IMEM | `0x0` | `0x0000_0000` | 64 KiB | Instruções | Só busca de instruções |
+| DMEM | `0x1` | `0x1000_0000` | 128 KiB | Dados | Leitura e escrita de 8, 16 e 32 bits |
+| Periféricos | `0x2` | `0x2000_0000` | 4 palavras | Dados | Leitura e escrita de 32 bits (ver abaixo) |
+| Demais | `0x3` a `0xF` | | | | Fora do mapa |
+
+Regras:
+
+- **Harvard estrita.** A porta de instruções enxerga só a IMEM; a porta de dados enxerga só a DMEM e os periféricos. Para o software (M4.1), o linker script põe `.text` na IMEM e `.rodata`, `.data` e `.bss` na DMEM. Como o testbench e o ISS carregam os dois `.hex` antes do reset, o `crt0` não copia `.data`; só zera `.bss`. Consequência para a verificação: o teste `fence_i` dos `rv32ui` escreve na memória de instruções e fica fora da suíte (Zifencei não está no escopo).
+- **Tamanhos parametrizáveis.** IMEM e DMEM são parâmetros do topo (seção 12) com os padrões da tabela, iguais no RTL e no ISS. O tamanho é sempre potência de dois.
+- **DMEM de 128 KiB.** O plano propôs 64 KiB; 128 KiB é a menor potência de dois que comporta a demonstração com 100 imagens residentes, conforme o orçamento abaixo. Decisão D2 em `docs/decisoes.md`.
+- **Fora do mapa.** Acesso a uma região não mapeada, ou além do tamanho configurado da IMEM, da DMEM ou dos periféricos: ver "A decidir".
+
+Orçamento da DMEM para a demonstração MNIST (estimativas; a M4.3 confirma os valores da rede):
+
+| Conteúdo | Tamanho |
+|---|---|
+| 100 imagens de 28 × 28 em int8 | 78.400 B |
+| Pesos e vieses da CNN (poucos milhares de parâmetros) | ~6 KiB |
+| Ativações em int8, requantizadas a cada saída (sem buffer int32) | ~10 KiB |
+| `.data`, `.bss` e pilha | ~8 KiB |
+| Total | ~102 KiB de 128 KiB |
+
+Os vetores de referência camada a camada (cerca de 9 KiB por imagem) não cabem para as 100 imagens; a comparação camada a camada da M4.4 é feita em poucas imagens ou fora do processador, a partir da memória lida pelo testbench.
+
+Periféricos. Cada registrador se comporta como uma palavra de memória de 32 bits com byte enables, e o efeito colateral acontece em toda escrita que habilite o byte 0:
+
+| Endereço | Nome | Leitura | Escrita |
+|---|---|---|---|
+| `0x2000_0000` | `console` | Retorna 0 | O byte `[7:0]` é impresso como um caractere pelo testbench e pelo ISS |
+| `0x2000_0004` | `tohost` | Retorna o último valor escrito (0 após o reset) | Com bit 0 = 1, encerra a simulação com código `valor >> 1`; o valor `1` é sucesso. Com bit 0 = 0, só armazena |
+| `0x2000_0008`, `0x2000_000C` | reservados | Retorna 0 | Ignorada |
+
+O protocolo do `tohost` é o dos `riscv-tests` e do Spike: `RVTEST_PASS` escreve `1` e `RVTEST_FAIL` escreve `(número_do_teste << 1) | 1`. Os testes rodam sem alteração no RTL, no ISS e no Spike, com o mesmo código de término. O Spike não tem o `console` neste endereço; a M4.1 decide como os programas imprimem lá.
+
+Não há espelhos dos contadores nos periféricos: o software lê `mcycle` e `minstret` com `csrr` (seção 9), como a HAL da M4.1 já prevê.
 
 A decidir:
 
-- Confirmar as bases e os tamanhos propostos no plano: IMEM em `0x0000_0000` e DMEM em `0x1000_0000`, 64 KiB cada.
-- Tamanho da DMEM: 100 imagens MNIST de 784 bytes ocupam cerca de 78 KB, mais do que 64 KiB. Escolher entre DMEM maior ou carga de uma imagem por vez pelo testbench. Afeta a pessoa C (M4.1, M4.4).
-- Endereços e semântica do console (`0x2000_0000`) e do `tohost` (`0x2000_0004`) propostos na M4.1; confirmar aqui.
-- Se os espelhos dos contadores entram como periféricos ou se só os CSRs bastam.
-- O que acontece em acesso fora do mapa: ignorar, devolver zero ou gerar trap.
+- Retirada dos espelhos dos contadores: confirmar com a pessoa C, dona do item `periph` na M2.2.
+- Acesso fora do mapa ou além do tamanho configurado. Proposta: leitura retorna 0 e escrita é ignorada, no RTL e no ISS, e o testbench acusa qualquer acesso desses como erro do teste. Se a seção 9 adotar traps de acesso, passa a gerar trap.
+- Acessos desalinhados: seção 10.
 
 ## 3. Reset e término
 
@@ -36,22 +72,73 @@ Estado do processador após o reset (PC, registradores, CSRs) e como um programa
 A decidir:
 
 - Vetor de reset (proposta: `0x0000_0000`, parametrizável).
-- Protocolo de término pelo `tohost`: proposta da M4.1 é escrever `(código << 1) | 1`, com `1` significando sucesso, mesma convenção do Spike e dos `riscv-tests`. Confirmar.
+- Sequência de término vista pelo programa: a escrita no `tohost` (seção 2) encerra a simulação; definir o que o núcleo faz depois dela, se continua executando ou para.
 - Se o banco de registradores é zerado no reset ou fica indefinido.
 
 ## 4. Instruções custom
 
-As três instruções para redes neurais quantizadas: `mac`, `sat` e `relu`. Tabela de codificação completa (opcode, `funct3`, `funct7`, campos `rd`, `rs1`, `rs2`), sintaxe em assembly, semântica exata em pseudocódigo bit a bit, e o comportamento em todos os casos de borda. Esta seção é a base para o RTL (M2.4), o ISS (M3.2), os intrínsecos (M4.2) e os covergroups (M3.3).
+As três instruções para redes neurais quantizadas: `mac`, `sat` e `relu`. Esta seção é a base para o RTL (M2.4), o ISS (M3.2), os intrínsecos (M4.2) e os covergroups (M3.3). A codificação e a semântica partem da tabela 4.1.3 do plano de trabalho; o que o plano deixou em aberto é fechado aqui.
+
+### 4.1 Codificação
+
+Formato R-type sobre o opcode `custom-0`, que a especificação RISC-V reserva para extensões do projetista e garante que nenhuma extensão padrão usa. Os campos `funct3` e `funct7` distinguem as instruções; `funct7` é zero nas três.
+
+| Bits | 31:25 | 24:20 | 19:15 | 14:12 | 11:7 | 6:0 |
+|---|---|---|---|---|---|---|
+| Campo | `funct7` | `rs2` | `rs1` | `funct3` | `rd` | `opcode` |
+
+| Mnemônico | Sintaxe | `funct3` | `funct7` | `opcode` | Equivalente em `.insn` |
+|---|---|---|---|---|---|
+| `mac` | `mac rd, rs1, rs2` | `000` | `0000000` | `0001011` (`0x0B`) | `.insn r 0x0B, 0x0, 0x00, rd, rs1, rs2` |
+| `sat` | `sat rd, rs1, rs2` | `001` | `0000000` | `0001011` | `.insn r 0x0B, 0x1, 0x00, rd, rs1, rs2` |
+| `relu` | `relu rd, rs1` | `010` | `0000000` | `0001011` | `.insn r 0x0B, 0x2, 0x00, rd, rs1, x0` |
+
+Regras comuns às três:
+
+- Os mnemônicos existem nesta especificação, no trace do ISS e na documentação. O assembler GNU não os conhece; o software emite as instruções com a diretiva `.insn r` (M4.2) e o `objdump` as mostra como palavras cruas, decodificadas pelo script da M4.2.
+- `rd = x0`: a escrita em `rd` é descartada, como em qualquer R-type. Para `sat` e `relu` a instrução não tem efeito arquitetural; para `mac` o acumulador é atualizado mesmo assim (4.2). Em todos os casos a instrução é retirada e contada em `minstret`.
+- `funct3` de `011` a `111` e qualquer `funct7` diferente de zero são reservados. Tratamento em "A decidir".
+
+### 4.2 `mac`: multiplicação e acumulação
+
+A unidade custom tem um registrador interno de 32 bits, o acumulador `ACC`, zerado no reset. O software o enxerga como o CSR `macacc`, endereço `0x7C0`, dentro da faixa `0x7C0` a `0x7FF` que a especificação RISC-V reserva para CSRs do projetista em modo máquina, com leitura e escrita pelas instruções Zicsr padrão.
+
+```
+ACC ← (ACC + rs1 × rs2) mod 2^32
+rd  ← ACC                         (valor novo)
+```
+
+- `rs1` e `rs2` são palavras de 32 bits; a `mac` não lê `rd`. O resultado são os 32 bits menos significativos da soma. Os 32 bits baixos de um produto não dependem de os fatores serem lidos com ou sem sinal, então não há variante com e sem sinal.
+- Overflow: wrap-around, sem flag e sem exceção. Com o `ACC` valendo `a`, `mac rd, rs1, rs2` deixa em `rd` e no `ACC` exatamente o valor de `mul t, rs1, rs2` seguido de `add rd, a, t` da extensão M. É essa equivalência que permite comparar bit a bit as versões `baseline` e `ext` da aplicação: a saturação nunca é implícita, só pela `sat`.
+- `rd = x0`: a cópia para `rd` é descartada, mas o `ACC` é atualizado mesmo assim. É o uso normal no laço interno, quando só o acumulado importa.
+- Zerar, ler e carregar o acumulador: `csrwi 0x7C0, 0`, `csrr rd, 0x7C0` e `csrw 0x7C0, rs1`. São instruções Zicsr que o assembler GNU já aceita com o endereço numérico; não há instrução custom nova.
+- Um só acumulador: uma acumulação por vez. A aplicação calcula um elemento de saída de cada vez; para intercalar duas acumulações, o software salva e restaura o `ACC` com `csrr` e `csrw`.
+- O compilador não conhece o `ACC`. O software zera o `ACC` no início de cada acumulação e não supõe que ele sobreviva a chamadas de função. Os intrínsecos da M4.2 usam `asm volatile` na `mac` e nos acessos ao `ACC`, para o compilador não os reordenar, duplicar nem eliminar (risco R7).
+- Referência em C (M4.2), com `acc` representando o `ACC`: `acc = (uint32_t)acc + (uint32_t)a * (uint32_t)b; rd = (int32_t)acc;`. Aritmética sem sinal para o overflow não ser comportamento indefinido em C.
+- Na aplicação, a soma de produtos int8 × int8 fica longe de 2^31: um filtro 3 × 3 sobre 16 canais soma 144 produtos de módulo até 2^14, menos de 2^22, mais um viés. O wrap-around existe para a semântica ser completa e determinística, não porque ocorra em uso normal.
+
+Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acessa o acumulador. Decisão: **acumulador dedicado na unidade custom, exposto como CSR**, registrada como D3 em `docs/decisoes.md`.
+
+- O banco de registradores continua com duas portas de leitura e uma de escrita. A `mac` lê `rs1` e `rs2` como qualquer R-type e escreve `rd` pelo caminho normal de WB, participando do forwarding como produtora.
+- O `ACC` fica na unidade custom, no estágio EX. A `mac` lê o `ACC` e o escreve na borda de relógio do mesmo ciclo em EX, então `mac` consecutivas se encadeiam sem forwarding nem stall.
+- Os acessos ao `ACC` pelas instruções Zicsr também executam em EX, em ordem de programa, logo não há hazard entre `csrw`, `csrr` e `mac` além do que a ordem do pipeline já garante.
+- A escrita do `ACC` obedece ao mesmo sinal de descarte que as demais escritas de estado: se a instrução em EX for anulada por flush ou por trap de uma instrução mais antiga (seção 9), o `ACC` não muda.
+- Requisito para a seção 6: a latência da `mac` é a da `mul`, e `mac` consecutivas nunca param. Com multiplicador de dois ciclos, a `mac` faz o produto no primeiro e a soma no `ACC` no segundo, em pipeline; nesse caso o valor de `rd` fica pronto um estágio depois, como um load, e a unidade de hazards o trata como load-use.
+- Motivo da escolha e alternativas descartadas: D3.
+
+### 4.3 `sat`: saturação
+
+A definir no próximo passo. Proposta do plano: `rd ← clamp(rs1, −2^(n−1), 2^(n−1)−1)`, com `n = rs2[4:0]`, comparação com sinal.
+
+### 4.4 `relu`: ativação
+
+A definir no próximo passo. Proposta do plano: `rd ← 0` se `rs1 < 0` com sinal, senão `rd ← rs1`; `rs2 = x0`.
 
 A decidir:
 
-- Confirmar a codificação proposta: opcode `0001011` (custom-0), `funct3` = `000` (`mac`), `001` (`sat`), `010` (`relu`), `funct7` = `0000000`.
-- Semântica exata da `mac`: largura dos operandos (int8 × int8, int32 × int32 ou outra), acumulação em 32 bits, comportamento em overflow.
-- Como a `mac` lê o acumulador em `rd`: terceira porta de leitura no banco, acumulador dedicado, execução em dois ciclos ou acumulador em `rs1`. Registrar o efeito no forwarding.
-- Largura da saturação: em registrador (`rs2[4:0]`, como proposto) ou em imediato.
-- Comportamento de `sat` com `n = 0`.
-- Comportamento com `rd = x0`.
-- Comportamento com `funct3` ou `funct7` reservados: instrução ilegal ou `nop`.
+- `sat`: largura em registrador (`rs2[4:0]`, como o plano propõe) ou em imediato; comportamento com `n = 0`, `n = 1` e `rs2[31:5]` diferente de zero.
+- `relu`: comportamento quando `rs2` não é `x0`: ignorar o campo ou tratar como reservada.
+- `funct3` e `funct7` reservados: instrução ilegal ou `nop`. Depende do tratamento de instrução ilegal na seção 9.
 
 ## 5. Pipeline
 
@@ -95,11 +182,11 @@ A decidir:
 
 ## 9. CSRs e traps
 
-Lista dos CSRs implementados com endereço, bits implementados e comportamento de leitura e escrita. Tratamento de `ecall`, `ebreak`, instrução ilegal e eventuais exceções de endereço: se geram trap, para onde o PC vai e o que é salvo.
+Lista dos CSRs implementados com endereço, bits implementados e comportamento de leitura e escrita. Tratamento de `ecall`, `ebreak`, instrução ilegal e eventuais exceções de endereço: se geram trap, para onde o PC vai e o que é salvo. O CSR custom `macacc` (`0x7C0`), acumulador da `mac`, está definido na seção 4.2 e entra nesta lista.
 
 A decidir:
 
-- CSRs mínimos: `mcycle`/`mcycleh` e `minstret`/`minstreth`. Decidir se `mstatus`, `mtvec`, `mepc`, `mcause` e `mret` entram.
+- CSRs mínimos: `mcycle`/`mcycleh`, `minstret`/`minstreth` e `macacc`. Decidir se `mstatus`, `mtvec`, `mepc`, `mcause` e `mret` entram.
 - Como `ecall`, `ebreak` e instrução ilegal são tratados: trap completo, término da simulação ou `nop`.
 - Se `minstret` conta as instruções custom como uma instrução cada (sim, por padrão) e se conta instruções descartadas por flush (não).
 
@@ -121,6 +208,7 @@ A decidir:
 
 - Lista exata de sinais e larguras.
 - Se o trace inclui o valor de `rs1` e `rs2` lidos (RVFI inclui) ou só o resultado.
+- Se o trace inclui escritas de CSR. O `ACC` da `mac` (seção 4.2) aparece em `rd` a cada `mac`, mas uma escrita por `csrw` só é observada na `mac` ou no `csrr` seguinte.
 - Como representar o retire de uma instrução comprimida (instrução de 16 bits ou já expandida).
 
 ## 12. Parâmetros do topo
@@ -137,3 +225,5 @@ A decidir:
 | Versão | Data | Autor | Mudança |
 |---|---|---|---|
 | 0.1 | 2026-10-07 | Lucas Lares | Esqueleto com as seções e os pontos a decidir. |
+| 0.2 | 2026-10-07 | Lucas Lares | Seção 2 preenchida: regiões, periféricos, protocolo do `tohost` e orçamento da DMEM. |
+| 0.3 | 2026-10-07 | Lucas Lares | Seção 4: codificação das três instruções e semântica da `mac`, com acumulador dedicado exposto como CSR `0x7C0`. |
