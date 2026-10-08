@@ -4,7 +4,7 @@ Ordem de execução do início ao fim, seguindo as metas do Plano de Trabalho (`
 
 As semanas deste checklist são as do cronograma replanejado, não as 24 do plano. A execução começa em 05/10/2026, a entrega continua em 28/02/2027 e há um recesso de 21/12/2026 a 03/01/2027: são 19 semanas de trabalho, numeradas no calendário abaixo. A ordem das metas e as dependências entre elas são as do plano.
 
-Última atualização: 2026-10-04. Semana atual do projeto: 1, com início em 2026-10-05.
+Última atualização: 2026-10-07. Semana atual do projeto: 1, com início em 2026-10-05.
 
 Etiquetas: `[GES]` gestão · `[RTL]` hardware · `[VER]` verificação e modelo de referência · `[SW]` software, toolchain e IA · `[DOC]` documentação.
 
@@ -85,7 +85,7 @@ Gestão e documentação inicial:
 
 ## Semana 1 a 4 (até 01/11/2026) — M4.1 Toolchain e fluxo bare-metal `[SW]`
 
-- [ ] `sw/common/link.ld` com o mapa de memória do plano (IMEM em `0x0000_0000`, DMEM em `0x1000_0000`, 64 KiB cada) e os símbolos `__stack_top`, `__bss_start`, `__bss_end`, `__global_pointer$`.
+- [ ] `sw/common/link.ld` com o mapa de memória da especificação, seção 2 (IMEM em `0x0000_0000` com 64 KiB, DMEM em `0x1000_0000` com 128 KiB) e os símbolos `__stack_top`, `__bss_start`, `__bss_end`, `__global_pointer$`.
 - [ ] `sw/common/crt0.S`: código em `.text.init` no endereço 0 que carrega `gp` e `sp`, zera `.bss`, chama `main` e, no retorno, sinaliza término.
 - [ ] `sw/common/hal.h` e `hal.c`: escrita de caractere no console (`0x2000_0000`), término pelo registrador `tohost` (`0x2000_0004`), leitura de `mcycle` e `minstret` via `csrr`. Protocolo de término proposto: escrever `(código << 1) | 1`, com `1` significando sucesso (mesma convenção do Spike e dos riscv-tests); confirmar na M2.1.
 - [ ] `sw/hello/main.c`: imprime uma mensagem, lê os contadores e termina.
@@ -100,11 +100,11 @@ Gestão e documentação inicial:
 
 Este documento é o contrato entre RTL, ISS, testbench e software. Nada de RTL, ISS ou intrínseco definitivo antes dele.
 
-- [ ] Criar `docs/especificacao.md` com as seções: escopo, mapa de memória e periféricos, reset e término, instruções custom, pipeline, extensão M, extensão A, extensão C, CSRs e traps, interface de memória, interface de trace, parâmetros do topo, histórico de versões.
-- [ ] Mapa de memória: confirmar bases e tamanhos. Atenção: 100 imagens MNIST de 784 bytes ocupam cerca de 78 KB, mais do que os 64 KiB propostos para a DMEM. Decidir entre DMEM maior ou carga de uma imagem por vez pelo testbench.
-- [ ] Periféricos: endereços e semântica do console, do `tohost` e dos espelhos dos contadores; protocolo de término.
+- [x] Criar `docs/especificacao.md` com as seções: escopo, mapa de memória e periféricos, reset e término, instruções custom, pipeline, extensão M, extensão A, extensão C, CSRs e traps, interface de memória, interface de trace, parâmetros do topo, histórico de versões.
+- [x] Mapa de memória: confirmar bases e tamanhos. Atenção: 100 imagens MNIST de 784 bytes ocupam cerca de 78 KB, mais do que os 64 KiB propostos para a DMEM. Decidir entre DMEM maior ou carga de uma imagem por vez pelo testbench. Decidido: DMEM de 128 KiB (D2 em `docs/decisoes.md`).
+- [x] Periféricos: endereços e semântica do console, do `tohost` e dos espelhos dos contadores; protocolo de término. Definidos na especificação, seção 2; espelhos dos contadores retirados, a confirmar com C.
 - [ ] Instruções custom: tabela de codificação (opcode `0001011`, funct3 `000`/`001`/`010`, funct7 `0000000`), semântica exata de `mac`, `sat` e `relu`, comportamento com `rd = x0`, com `funct3` e `funct7` reservados, e `sat` com `n = 0`.
-- [ ] Decisão sobre a leitura de `rd` na MAC: terceira porta de leitura no banco, acumulador dedicado, execução em dois ciclos ou acumulador em `rs1`. Registrar a escolha e o efeito no forwarding.
+- [x] Decisão sobre a leitura de `rd` na MAC: terceira porta de leitura no banco, acumulador dedicado, execução em dois ciclos ou acumulador em `rs1`. Registrar a escolha e o efeito no forwarding. Decidido: acumulador dedicado na unidade custom, exposto como CSR `0x7C0`; a `mac` copia o novo acumulado em `rd` (D3 em `docs/decisoes.md`; especificação, seção 4.2).
 - [ ] Decisão sobre a largura de saturação: registrador (`rs2[4:0]`, como proposto) ou imediato.
 - [ ] Pipeline: estágios, registradores entre estágios, forwarding EX/MEM e MEM/WB, stall de load-use, resolução de desvio em EX com predição não tomado, flush. Diagrama de blocos do pipeline (exigido no aceite).
 - [ ] Extensão M: multiplicação em 1 ou 2 ciclos, divisão multiciclo com stall, compartilhamento ou não do multiplicador com a MAC.
@@ -139,8 +139,8 @@ Depende de: interface de memória e de trace definidas na M2.1; um núcleo míni
 Ordem interna pensada para ter um núcleo mínimo executando cedo (para a M3.1) e crescer sem retrabalho. Os itens marcados com (C) são da pessoa C, que cuida da plataforma em volta do núcleo; os demais são da pessoa A.
 
 - [ ] Estrutura de `rtl/`: um módulo por arquivo, nomes conforme a especificação; `soc_top` (núcleo + memórias + periféricos), `core_top` (só o núcleo).
-- [ ] (C) `imem` e `dmem` em Verilog com `$readmemh`, tamanhos parametrizados; `periph` com console, `tohost` e espelhos dos contadores; `soc_top` ligando o núcleo às memórias e aos periféricos.
-- [ ] Banco de registradores (32 × 32 bits, `x0` fixo em zero, portas conforme a decisão da MAC).
+- [ ] (C) `imem` e `dmem` em Verilog com `$readmemh`, tamanhos parametrizados; `periph` com console e `tohost` (sem espelhos dos contadores, especificação seção 2); `soc_top` ligando o núcleo às memórias e aos periféricos.
+- [ ] Banco de registradores (32 × 32 bits, `x0` fixo em zero, duas portas de leitura e uma de escrita; a `mac` não lê `rd`, D3).
 - [ ] Gerador de imediatos, decodificador RV32I, ALU.
 - [ ] Estágio IF: PC, busca, cálculo de PC + 4 (PC + 2 entra na M2.3).
 - [ ] Estágio ID: decodificação, leitura do banco, imediatos.
@@ -173,7 +173,7 @@ Ordem interna pensada para ter um núcleo mínimo executando cedo (para a M3.1) 
 
 ## Semana 5 a 8 (até 29/11/2026) — M4.2 Biblioteca de intrínsecos `[SW]`
 
-- [ ] `sw/include/ci_ext.h`: `mac`, `sat` e `relu` via `asm` inline com `.insn r`, restrições `"+r"` no acumulador e `"=r"`/`"r"` nos demais, conforme a codificação da M2.1.
+- [ ] `sw/include/ci_ext.h`: `mac`, `sat` e `relu` via `asm volatile` com `.insn r`, restrições `"=r"` em `rd` e `"r"` nos fontes, mais funções para zerar, ler e carregar o acumulador com `csrwi`, `csrr` e `csrw` no CSR `0x7C0`, conforme a especificação, seção 4.2.
 - [ ] `sw/include/ci_ref.h`: as mesmas três funções em C puro, sem UB, usadas como referência e na versão `baseline`.
 - [ ] Script que roda `objdump -d`, localiza as palavras com opcode `0x0B` e decodifica os campos, para conferir a codificação de cada ocorrência.
 - [ ] `sw/tests/custom/`: teste unitário que compara intrínseco e referência em valores de borda (máximos, mínimos, zero, negativos, overflow da MAC, limites da SAT com n = 8 e 16) e em valores aleatórios determinísticos.
@@ -215,9 +215,9 @@ A janela termina na última semana antes do recesso. Na revisão de riscos da se
 ## Semana 10 a 13 (até 17/01/2027) — M2.4 Unidade de extensões customizadas `[RTL]`
 
 - [ ] Decodificação do opcode `custom-0` e dos campos `funct3`/`funct7`; tratamento dos valores reservados conforme a M2.1.
-- [ ] Mecanismo de leitura de `rd` para a MAC conforme a decisão da M2.1 (porta extra, acumulador, dois ciclos), com o forwarding correspondente.
+- [ ] Registrador `ACC` na unidade custom, exposto como CSR `0x7C0` (D3): reset, escrita condicionada ao descarte por flush ou trap, acesso por `csrr`, `csrw` e `csrwi` integrado à unidade de CSRs.
 - [ ] `custom_unit` no estágio EX: MAC (multiplicador próprio ou compartilhado), SAT, RELU; resultado pelo caminho normal de WB.
-- [ ] Testes dirigidos das três instruções (os de M4.2 e programas em assembly) aprovados contra o ISS, incluindo casos de borda e hazards envolvendo `rd` da MAC.
+- [ ] Testes dirigidos das três instruções (os de M4.2 e programas em assembly) aprovados contra o ISS, incluindo casos de borda e sequências envolvendo o `ACC`: `csrw` seguida de `mac`, `mac` seguida de `csrr`, `mac` com `rd = x0`.
 - [ ] Covergroups das instruções custom atingindo as bordas previstas.
 - [ ] Aceite M2.4 (plano): testes dirigidos das três instruções aprovados contra o modelo de referência, incluindo casos de borda.
 

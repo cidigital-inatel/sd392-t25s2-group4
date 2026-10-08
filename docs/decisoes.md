@@ -2,7 +2,7 @@
 
 Registro único das decisões de projeto, dos riscos acompanhados e das mudanças de escopo. É consultado nas reuniões semanais e revisado formalmente nas revisões de riscos e mudanças (meta M1.4: semanas 3, 7, 11, 14, 17 e 19). As semanas citadas neste registro são as do cronograma replanejado, descrito em `docs/checklist.md`.
 
-Última atualização: 2026-10-04.
+Última atualização: 2026-10-07.
 
 ## 1. Decisões tomadas
 
@@ -11,6 +11,8 @@ Uma linha por decisão técnica ou de organização, na ordem em que foram tomad
 | Nº | Data | Decisão | Motivo | Alternativas consideradas |
 |---|---|---|---|---|
 | D1 | 2026-10-04 | Cronograma replanejado de 24 para 19 semanas de trabalho, com o mesmo escopo. As janelas de cada meta estão em `docs/checklist.md`. | A execução começa em 05/10/2026 e a entrega continua em 28/02/2027, com recesso de 21/12/2026 a 03/01/2027. | Reduzir o escopo desde já, retirando a extensão C. Não adotada: fica como ponto de decisão na revisão de riscos da semana 11 (risco R2). |
+| D2 | 2026-10-07 | DMEM com tamanho padrão de 128 KiB, em vez dos 64 KiB do plano de trabalho. Parâmetro do topo, igual no RTL e no ISS (`docs/especificacao.md`, seção 2). | A demonstração MNIST mantém 100 imagens de 28 × 28 em int8 residentes na DMEM (78.400 B), o que sozinho ultrapassa 64 KiB. Com pesos, ativações, `.data`, `.bss` e pilha, a estimativa é de ~102 KiB; 128 KiB é a menor potência de dois que comporta esse orçamento. A M4.3 confirma os valores da rede. | Manter 64 KiB e carregar uma imagem por vez pelo testbench (exige protocolo de sincronização entre programa e testbench, no RTL e no ISS). Manter 64 KiB com 50 imagens (restringe a demonstração). Região de memória separada só para imagens (mais uma região no decodificador, no ISS, no linker e no fluxo de `.hex`). |
+| D3 | 2026-10-07 | A `mac` acumula em um registrador dedicado de 32 bits na unidade custom, o `ACC`, exposto ao software como o CSR `macacc` (`0x7C0`, faixa reservada a CSRs do projetista). `mac rd, rs1, rs2` faz `ACC ← ACC + rs1 × rs2` e copia o novo `ACC` em `rd`; zerar, ler e carregar usam `csrwi`, `csrr` e `csrw` padrão (`docs/especificacao.md`, seção 4.2). | Decisão de projeto do líder técnico: o acumulador fica dentro da unidade MAC, como em um DSP. A exposição por CSR evita instruções custom novas, mantendo as três do plano; a cópia em `rd` torna o acumulado visível ao scoreboard a cada `mac` e disponível direto para `sat` e `relu`. `mac` consecutivas se encadeiam dentro de EX sem forwarding; o banco de registradores fica com duas portas de leitura. Custo: estado novo fora do banco (reset, ISS, descarte em flush), um só acumulador, e intrínsecos com `asm volatile` (risco R7). | Terceira porta de leitura no banco com `rd ← rd + rs1 × rs2` (sem estado novo e com vários acumuladores em registradores gerais, mas acumulador fora da unidade MAC, contra o modelo escolhido). Acumulador dedicado sem cópia em `rd` (acumulado invisível ao scoreboard até um `csrr`). Duas instruções custom novas para zerar e ler o `ACC` (cinco instruções em vez de três). Execução em dois ciclos (um stall por `mac`). |
 
 ## 2. Riscos
 
@@ -24,8 +26,8 @@ Riscos mapeados no plano de trabalho (seção 7.4). A coluna "Situação" é atu
 | R4 | Tempo de simulação da inferência MNIST em RTL | Demonstração incompleta | Usar subconjunto de imagens; validar camadas isoladamente com vetores de referência; otimizar o testbench (desativar dumps de forma de onda). | Aberto |
 | R5 | Curva de aprendizado de UVM e SystemVerilog | Atraso em M3.1–M3.3 | Iniciar o ambiente com smoke test simples na semana 2; estudo dirigido com material da Accellera/Cadence; pareamento entre integrantes. | Aberto |
 | R6 | Dificuldades na construção da toolchain | Atraso em M4.1 | Utilizar binários pré-compilados; documentar versões; testar o fluxo com programa mínimo antes dos riscv-tests. | Aberto |
-| R7 | Compilador reordenar, duplicar ou eliminar instruções asm inline | Resultados incorretos na aplicação | Restrições de operandos corretas (`"+r"`, `"=r"`, `"r"`); testes unitários dos intrínsecos; inspeção do código gerado com objdump. | Aberto |
-| R8 | Definição tardia da semântica das instruções (MAC com leitura de `rd`, largura de SAT) | Retrabalho em RTL, modelo e software | Fechar a especificação (M2.1) até a semana 4 com aprovação do orientador; tratar mudanças posteriores pela seção 7.1 do plano (seção 3 deste registro). | Aberto |
+| R7 | Compilador reordenar, duplicar ou eliminar instruções asm inline | Resultados incorretos na aplicação | `asm volatile` na `mac` e nos acessos ao acumulador, para manter a ordem e impedir eliminação; restrições de operandos corretas (`"=r"`, `"r"`); testes unitários dos intrínsecos; inspeção do código gerado com objdump. | Aberto |
+| R8 | Definição tardia da semântica das instruções (MAC com leitura de `rd`, largura de SAT) | Retrabalho em RTL, modelo e software | Fechar a especificação (M2.1) até a semana 4 com aprovação do orientador; tratar mudanças posteriores pela seção 7.1 do plano (seção 3 deste registro). | Aberto. Acumulador da MAC decidido em 2026-10-07 (D3); largura de SAT pendente. |
 
 ## 3. Mudanças de escopo
 
