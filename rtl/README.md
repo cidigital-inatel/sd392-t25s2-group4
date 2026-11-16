@@ -1,6 +1,6 @@
 # rtl
 
-Núcleo RISC-V RV32IMAC em pipeline de cinco estágios, em Verilog (IEEE 1364-2005), com a unidade das instruções customizadas `mac`, `sat` e `relu`, mais as memórias de instruções e de dados e os periféricos simulados (console, registrador de término e contadores).
+Núcleo RISC-V RV32IMAC em pipeline de cinco estágios, em Verilog (IEEE 1364-2005), com a unidade das instruções customizadas `mac`, `sat` e `relu`, mais as memórias de instruções e de dados e os periféricos simulados (console e registrador de término; os contadores são CSRs lidos com `csrr`, conforme `docs/especificacao.md`, seção 2).
 
 Começa a ser preenchida na meta M2.2, depois que a especificação (`docs/especificacao.md`, meta M2.1) estiver aprovada. Nada de RTL antes disso.
 

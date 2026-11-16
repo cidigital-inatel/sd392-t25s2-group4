@@ -57,11 +57,10 @@ Periféricos. Cada registrador se comporta como uma palavra de memória de 32 bi
 
 O protocolo do `tohost` é o dos `riscv-tests` e do Spike: `RVTEST_PASS` escreve `1` e `RVTEST_FAIL` escreve `(número_do_teste << 1) | 1`. Os testes rodam sem alteração no RTL, no ISS e no Spike, com o mesmo código de término. O Spike não tem o `console` neste endereço; a M4.1 decide como os programas imprimem lá.
 
-Não há espelhos dos contadores nos periféricos: o software lê `mcycle` e `minstret` com `csrr` (seção 9), como a HAL da M4.1 já prevê.
+Não há espelhos dos contadores nos periféricos: o software lê `mcycle` e `minstret` com `csrr` (seção 9), como a HAL da M4.1 já prevê. Decisão D4 em `docs/decisoes.md`.
 
 A decidir:
 
-- Retirada dos espelhos dos contadores: confirmar com a pessoa C, dona do item `periph` na M2.2.
 - Acesso fora do mapa ou além do tamanho configurado. Proposta: leitura retorna 0 e escrita é ignorada, no RTL e no ISS, e o testbench acusa qualquer acesso desses como erro do teste. Se a seção 9 adotar traps de acesso, passa a gerar trap.
 - Acessos desalinhados: seção 10.
 
