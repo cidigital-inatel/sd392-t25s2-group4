@@ -4,18 +4,73 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.7, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.8, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
 ## 1. Escopo
 
-O que o processador implementa e o que fica de fora. Lista das extensões (RV32I, M, A, C, Zicsr, custom-0), o modo de privilégio suportado, o que é parametrizável e a ordem de prioridade se for preciso cortar escopo (plano, seção 7.3).
+Define o que o processador implementa, o que fica fora, o que é parametrizável, a referência de conformidade e a ordem de corte de escopo. Decisão D9 em `docs/decisoes.md`.
 
-A decidir:
+### 1.1 O que está dentro
 
-- Confirmar que só o modo máquina (M) é implementado.
-- Confirmar quais CSRs da Zicsr entram (depende da seção 9).
+Um núcleo RISC-V de 32 bits, único (um hart), em ordem, em pipeline de cinco estágios (seção 5), sem cache, com memória Harvard (seção 2), que implementa:
+
+| Extensão | Conteúdo | Habilitação |
+|---|---|---|
+| RV32I | As 40 instruções do conjunto base de inteiros, versão 2.1, incluindo `fence`, `ecall` e `ebreak`. | sempre |
+| M | `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem`, `remu` (seção 6). | parâmetro |
+| A | `lr.w`, `sc.w` e as nove `amo*.w` (seção 7). | parâmetro |
+| C | Todas as instruções RV32C que não dependem de ponto flutuante (seção 8). | parâmetro |
+| Zicsr | `csrrw`, `csrrs`, `csrrc`, `csrrwi`, `csrrsi`, `csrrci`, sobre os CSRs da seção 9.1. | sempre |
+| `Xqnn` | `mac`, `sat` e `relu` sobre o opcode `custom-0`, mais o CSR `macacc` (seção 4). | parâmetro |
+| Privilegiada | Modo máquina apenas, com o mecanismo de trap, `mret`, `wfi` e os CSRs da seção 9. | sempre |
+
+`Xqnn`, de quantized neural network, é o nome da extensão custom, no formato que a ISA reserva para extensões não padrão: `X` seguido de letras minúsculas. Neste documento, "extensão custom", "unidade custom" e `Xqnn` são a mesma coisa. O nome aparece no bit `X` do `misa` (seção 9.1), no parâmetro de habilitação (seção 12), no nome do módulo em Verilog e na documentação. A toolchain não o conhece: o software emite as instruções com `.insn` (seção 4.1).
+
+### 1.2 O que está fora
+
+Fora do escopo de propósito, não por esquecimento. Cada item traz o motivo ou a seção que o justifica:
+
+- Interrupções e temporizador (`mtime`, `mtimecmp`): não há fonte de interrupção no sistema simulado; `mie` e `mip` leem zero (seção 9).
+- Modos supervisor e usuário, e o que vem com eles: `medeleg`, `mideleg`, `mcounteren`, PMP, memória virtual, `sret`, `sfence.vma`. Só modo máquina (seção 9).
+- Modo de depuração (`dret`, Debug Module).
+- Ponto flutuante (F, D), extensão B, extensão V e qualquer outra extensão padrão fora de M, A, C e Zicsr.
+- Zifencei (`fence.i`): a memória de instruções não é escrita pelo programa (seção 2); `fence.i` é instrução ilegal (seção 9).
+- Zicntr e Zihpm: as sombras `cycle`, `time` e `instret` e os contadores de desempenho; o software usa `mcycle` e `minstret` (seção 9).
+- Acesso a dados desalinhado atendido pelo hardware: gera exceção (seções 9 e 10).
+- Caches, buffer de escrita, predição dinâmica de desvio, execução fora de ordem.
+- Barramento padrão (AXI, OBI): a interface é a da seção 10; a adaptação é trabalho futuro.
+- Prototipação em FPGA e síntese para silício: toda a validação é em simulação. A síntese lógica genérica da M2.5 é opcional e só para estimativa de recursos.
+- Mais de um núcleo: a atomicidade da extensão A vem de haver um só mestre (seção 10).
+
+### 1.3 O que é parametrizável
+
+Vetor de reset, tamanho da IMEM e da DMEM, habilitação individual de M, A, C e `Xqnn`, e os wait states das memórias padrão. Nomes, tipos e valores padrão na seção 12. Com uma extensão desligada, suas instruções são ilegais e o bit correspondente do `misa` lê zero (seção 9).
+
+### 1.4 Referência e conformidade
+
+A ISA de referência é a do RISC-V Instruction Set Manual: Volume I, não privilegiado, versão 20191213, e Volume II, privilegiado, versão 20211203, as mesmas citadas no plano de trabalho. Onde a ISA deixa escolha ao projetista (acesso desalinhado, `mtval`, `wfi`, CSRs opcionais, codificações do `custom-0`), a escolha está nesta especificação.
+
+Conformidade do subconjunto padrão: a suíte `riscv-tests`, grupos `rv32ui`, `rv32um`, `rv32ua` e `rv32uc`, adaptada ao mapa de memória e ao `tohost` (M4.1), aprovada no RTL (M2.2 e M2.3) e no ISS (M3.2), com o ISS também comparado ao Spike. Ressalvas:
+
+- `fence_i` fica fora: Zifencei fora do escopo (seção 2).
+- `ma_data`, do `rv32ui`, exercita acessos desalinhados. Como aqui eles geram exceção, a M4.1 verifica se o teste aceita o trap com os códigos 4 e 6 (seção 9.2); se aceitar, entra; se não, fica fora como o `fence_i`, com registro em `docs/decisoes.md`.
+
+As instruções `Xqnn` não têm suíte externa: são verificadas contra o ISS, contra a implementação independente em C (seção 4) e contra os vetores de referência da CNN (M4.3), conforme o plano de verificação da M3.3.
+
+### 1.5 Ordem de corte de escopo
+
+Se for preciso cortar, a ordem de prioridade é a da seção 7.3 do plano de trabalho, do que fica até o fim ao que sai primeiro:
+
+1. Núcleo RV32I com a extensão `Xqnn`, verificado. É o essencial e não é cortado.
+2. Extensões M e A.
+3. Aplicação de demonstração comparativa (M4.4).
+4. Extensão C e otimizações.
+
+Todo corte é uma mudança de escopo: issue, linha na seção 3 de `docs/decisoes.md` e aprovação do orientador (plano, seção 7.1). A extensão C já tem o ponto de decisão marcado para a revisão de riscos da semana 11 (risco R2).
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 2. Mapa de memória e periféricos
 
@@ -63,13 +118,36 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 3. Reset e término
 
-Estado do processador após o reset (PC, registradores, CSRs) e como um programa sinaliza que terminou, com sucesso ou com erro, para o testbench e para o ISS encerrarem a simulação com o mesmo código.
+Define o estado do processador após o reset e como um programa sinaliza que terminou, para o testbench e o ISS começarem iguais e encerrarem na mesma instrução, com o mesmo código. Decisão D9 em `docs/decisoes.md`.
 
-A decidir:
+### 3.1 Reset
 
-- Vetor de reset (proposta: `0x0000_0000`, parametrizável).
-- Sequência de término vista pelo programa: a escrita no `tohost` (seção 2) encerra a simulação; definir o que o núcleo faz depois dela, se continua executando ou para.
-- Se o banco de registradores é zerado no reset ou fica indefinido.
+O reset é o `rst_n` da seção 10: síncrono, ativo em nível baixo. O núcleo entra em reset em qualquer borda de subida de `clk` com `rst_n = 0`; uma borda basta, mas o testbench padrão segura o reset por vários ciclos, e o núcleo não depende de quantos. Enquanto `rst_n = 0`, `ibus_valid` e `dbus_valid` ficam em 0, nenhuma instrução está em voo e nenhum estado muda. No primeiro ciclo com `rst_n = 1`, o núcleo emite a busca no vetor de reset e `mcycle` vale 0; `mcycle` incrementa ao fim de cada ciclo daí em diante.
+
+Estado após o reset:
+
+| Estado | Valor | Definido em |
+|---|---|---|
+| PC | vetor de reset: `0x0000_0000` por padrão, parâmetro | seção 12 |
+| `x1` a `x31` | 0 | esta seção |
+| CSRs | 0, inclusive `mstatus` (`MIE = 0`, `MPIE = 0`), `mtvec`, `mepc`, `mcause`, `mtval`, `mscratch`, `mcycle`/`mcycleh` e `minstret`/`minstreth`; `misa` e os de identificação são constantes | seção 9.1 |
+| `ACC` (`macacc`) | 0 | seção 4.2 |
+| Reserva de `lr.w`/`sc.w` | inválida | seção 7 |
+| Pipeline e buffer de busca | vazios | seções 5 e 8 |
+| IMEM e DMEM | não são afetadas pelo reset. O testbench e o ISS as carregam dos `.hex` antes de soltar o reset; `.rodata` e `.data` já estão na DMEM quando o programa começa | seção 2 |
+
+O banco de registradores é zerado no reset, e o ISS faz o mesmo. Uma SRAM real acordaria com conteúdo indefinido, mas em simulação registrador não inicializado vale X, enquanto no ISS vale 0: qualquer leitura antes de escrita, por exemplo num programa aleatório da M3.3, divergiria no scoreboard sem haver defeito, e o X poderia se espalhar pelo pipeline e poluir o trace. Zerar custa um reset em 31 registradores e elimina essa fonte de ruído. Com `mtvec = 0`, um trap antes de o software programá-lo salta para o vetor de reset; por isso o `crt0` escreve `mtvec` antes de tudo (seção 9.3).
+
+### 3.2 Término
+
+Um programa termina escrevendo no `tohost` (`0x2000_0004`, seção 2) um valor com o bit 0 em 1: `1` é sucesso, `(código << 1) | 1` é falha, e o código de saída da simulação é `valor >> 1`. É o protocolo dos `riscv-tests` e do Spike. O `console` (`0x2000_0000`) imprime e não encerra nada.
+
+- O núcleo não participa do término. O `tohost` é um periférico do `soc_top`; o núcleo não sabe que ele existe e continua buscando e executando depois da escrita.
+- O programa, logo depois da escrita, entra num laço infinito (`1: j 1b`). É o que os `riscv-tests` fazem e o que o `crt0` da M4.1 faz no retorno do `main`, usando o valor de retorno como código. Assim o comportamento continua definido e sem efeitos colaterais enquanto a simulação não parar.
+- O testbench e o ISS encerram no retire da instrução de store que escreveu no `tohost`. Esse retire aparece no trace com `rvfi_mem_addr = 0x2000_0004` e `rvfi_mem_wmask` incluindo o byte 0 (seção 11), é comparado normalmente e é o último comparado. Como os dois param na mesma instrução, não há "depois" para divergir.
+- Nenhuma outra coisa encerra a simulação. `ebreak`, `ecall` e instrução ilegal geram trap (seção 9), e é o tratador que decide, normalmente escrevendo no `tohost` com código de falha. Um limite de ciclos do testbench, para programa que travou, é falha do teste, não término.
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 4. Instruções custom
 
@@ -518,3 +596,4 @@ A decidir:
 | 0.5 | 2026-11-16 | Lucas Lares | Seção 11: trace de retire no padrão RVFI, com valores das fontes depois do forwarding, porta genérica de escrita de CSR, instrução comprimida crua e regra de sincronização do `mcycle` com o ISS (D6). |
 | 0.6 | 2026-11-16 | Lucas Lares | Seções 4.3 e 4.4: semântica de `sat` (largura em `rs2[4:0]`, `n = 0` identidade, `rs2[31:5]` ignorado) e de `relu` (não lê `rs2`); codificações reservadas do `custom-0` como instrução ilegal; nova 4.5 com efeitos no pipeline e a sequência de requantização (D7). |
 | 0.7 | 2026-11-16 | Lucas Lares | Seção 9: mecanismo de trap em modo máquina tomado no EX, tabela de CSRs, exceções com códigos e `mtval`, `mret`, contadores e instruções de sistema (D8). Fechados os itens que dependiam da 9 nas seções 2, 4, 8, 10, 11 e 12; as seções 2, 4, 9, 10 e 11 ficam sem pendências. |
+| 0.8 | 2026-11-16 | Lucas Lares | Seções 1 e 3: escopo com o que está dentro e fora, parâmetros, conformidade e ordem de corte, extensão custom nomeada `Xqnn`; reset com banco zerado e tabela de estado; término pelo `tohost` com o núcleo continuando e o fim no retire do store (D9). Seções 1 e 3 sem pendências. |
