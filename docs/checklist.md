@@ -4,7 +4,7 @@ Ordem de execução do início ao fim, seguindo as metas do Plano de Trabalho (`
 
 As semanas deste checklist são as do cronograma replanejado, não as 24 do plano. A execução começa em 05/10/2026, a entrega continua em 28/02/2027 e há um recesso de 21/12/2026 a 03/01/2027: são 19 semanas de trabalho, numeradas no calendário abaixo. A ordem das metas e as dependências entre elas são as do plano.
 
-Última atualização: 2026-10-07. Semana atual do projeto: 1, com início em 2026-10-05.
+Última atualização: 2026-11-16. Semana atual do projeto: 7 (16/11 a 22/11/2026); o projeto começou em 2026-10-05.
 
 Etiquetas: `[GES]` gestão · `[RTL]` hardware · `[VER]` verificação e modelo de referência · `[SW]` software, toolchain e IA · `[DOC]` documentação.
 
@@ -111,7 +111,7 @@ Este documento é o contrato entre RTL, ISS, testbench e software. Nada de RTL, 
 - [ ] Extensão A: reserva de `lr/sc` e sequência read-modify-write no MEM.
 - [ ] Extensão C: alinhamento de 16 bits, busca que cruza palavra, expansão em ID, habilitação por parâmetro.
 - [ ] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados.
-- [ ] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável.
+- [x] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável. Definida na especificação, seção 10: portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo (D5).
 - [ ] Interface de trace de retire (estilo RVFI): lista de sinais que o testbench e o ISS comparam (PC, instrução, `rd` e valor, endereço e dado de memória, trap).
 - [ ] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom.
 - [ ] Revisão pelos três membros e aprovação pelo orientador; versão 1.0 registrada.
