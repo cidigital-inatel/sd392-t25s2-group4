@@ -113,7 +113,7 @@ Este documento é o contrato entre RTL, ISS, testbench e software. Nada de RTL, 
 - [x] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados. Definidos na especificação, seção 9: trap em modo máquina com `mtvec`, `mepc`, `mcause`, `mtval`, `mstatus` mínimo e `mret`; `ecall`, `ebreak`, ilegal e desalinhado geram exceção (D8).
 - [x] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável. Definida na especificação, seção 10: portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo (D5).
 - [x] Interface de trace de retire (estilo RVFI): lista de sinais que o testbench e o ISS comparam (PC, instrução, `rd` e valor, endereço e dado de memória, trap). Definida na especificação, seção 11: subconjunto RVFI com fontes, destino, memória e porta genérica de escrita de CSR (D6).
-- [ ] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom.
+- [x] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom. Definidos na especificação, seção 12: `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE`, `DMEM_SIZE`, `IMEM_WAIT_STATES`, `DMEM_WAIT_STATES`; carga dos `.hex` pelo testbench (D10).
 - [ ] Revisão pelos três membros e aprovação pelo orientador; versão 1.0 registrada.
 - [ ] Aceite M2.1 (plano): especificação versionada, diagrama de blocos do pipeline e tabela de codificação aprovados.
 

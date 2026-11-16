@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.8, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.9, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -577,13 +577,47 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 12. Parâmetros do topo
 
-Parâmetros Verilog dos módulos `core_top` e `soc_top`, com nome, tipo, valor padrão e efeito: vetor de reset, tamanhos das memórias, habilitação individual das extensões M, A, C e custom.
+Define os parâmetros Verilog dos módulos `core_top`, só o núcleo, e `soc_top`, o núcleo mais `imem`, `dmem` e `periph`: nome, tipo, valor padrão, efeito e restrições. Define também os nomes das instâncias de `soc_top` e do vetor de memória de `imem` e `dmem`, que o testbench usa para carregar os programas. Um parâmetro é fixado na instanciação, não em tempo de execução; o `soc_top` expõe todos os parâmetros e repassa ao `core_top` os que são dele. Decisão D10 em `docs/decisoes.md`, com as alternativas descartadas.
 
-Já fixado pela seção 9 (D8): com uma extensão desligada, toda instrução dela é instrução ilegal (código 2), e o bit correspondente do `misa` lê 0.
+### 12.1 Parâmetros
 
-A decidir:
+| Parâmetro | Módulo | Tipo | Padrão | Efeito e restrições |
+|---|---|---|---|---|
+| `RESET_VECTOR` | `core_top` | inteiro de 32 bits | `32'h0000_0000` | PC após o reset (seção 3). Múltiplo de 4 e dentro da região da IMEM (seção 2). |
+| `EN_M` | `core_top` | 0 ou 1 | 1 | Extensão M (seção 6). Com 0, `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem` e `remu` são instrução ilegal e o bit `M` do `misa` lê 0. |
+| `EN_A` | `core_top` | 0 ou 1 | 1 | Extensão A (seção 7). Com 0, `lr.w`, `sc.w` e `amo*.w` são instrução ilegal e o bit `A` do `misa` lê 0. |
+| `EN_C` | `core_top` | 0 ou 1 | 1 | Extensão C (seção 8). Com 0, toda instrução de 16 bits é instrução ilegal, o PC alinha a 4, `mepc[1]` fica fixo em 0, alvo de desvio ou salto não múltiplo de 4 gera o código 0 (seção 9) e o bit `C` do `misa` lê 0. |
+| `EN_XQNN` | `core_top` | 0 ou 1 | 1 | Extensão `Xqnn` (seção 4). Com 0, todo o opcode `custom-0` é instrução ilegal, o CSR `macacc` não existe e acessá-lo é ilegal, e o bit `X` do `misa` lê 0. |
+| `IMEM_SIZE` | `soc_top` | inteiro, em bytes | 65536 | Tamanho da IMEM, 64 KiB. Potência de dois, de 1 KiB a 256 MiB, que é o tamanho da região (seção 2). |
+| `DMEM_SIZE` | `soc_top` | inteiro, em bytes | 131072 | Tamanho da DMEM, 128 KiB. Mesmas restrições. |
+| `IMEM_WAIT_STATES` | `soc_top` | inteiro, 0 ou mais | 0 | Ciclos com `ibus_ready = 0` antes de cada resposta da `imem` (seção 10.4). |
+| `DMEM_WAIT_STATES` | `soc_top` | inteiro, 0 ou mais | 0 | Idem para `dbus_ready` na `dmem`. `periph` não tem wait states. |
 
-- Nomes e valores padrão de cada parâmetro, inclusive o de wait states de `imem` e `dmem` (seção 10.4).
+Tamanhos em bytes, e não em palavras ou em bits de endereço, porque é a unidade da tabela da seção 2, do linker script (M4.1) e da configuração do ISS. Cada memória calcula internamente quantos bits de endereço usa a partir do tamanho; a restrição de potência de dois é o que permite isso.
+
+Valores fora das restrições, tamanho que não é potência de dois, vetor de reset desalinhado ou fora da IMEM, `EN_*` diferente de 0 e 1, são erro de elaboração: o módulo acusa com uma mensagem e encerra a simulação com `$finish` em um bloco `initial`, em vez de gerar hardware errado em silêncio.
+
+### 12.2 Instâncias e carga das memórias
+
+| Instância em `soc_top` | Módulo | Conteúdo |
+|---|---|---|
+| `u_core` | `core_top` | O núcleo. |
+| `u_imem` | `imem` | Memória de instruções: `reg [31:0] mem [0:IMEM_SIZE/4-1]`, uma palavra por posição, indexada por `ibus_addr` sem os dois bits baixos. |
+| `u_dmem` | `dmem` | Memória de dados: `reg [31:0] mem [0:DMEM_SIZE/4-1]`, indexada por `dbus_addr` sem os dois bits baixos; byte enables aplicados na escrita (seção 10). |
+| `u_periph` | `periph` | `console` e `tohost` (seção 2). |
+
+As memórias não carregam arquivo nenhum sozinhas e não leem a linha de comando. Quem carrega é o testbench, antes de soltar o reset, com `$readmemh` direto no vetor, por referência hierárquica: `$readmemh(arquivo, soc_top.u_imem.mem)` e o mesmo para `u_dmem`. O nome do arquivo vem de `plusargs` do testbench, por exemplo `+imem=` e `+dmem=`, de modo que o mesmo RTL compilado roda qualquer programa sem recompilar. O formato do `.hex` é o da M4.1: uma palavra de 32 bits por linha, em ordem crescente de endereço a partir da base da região, com os bytes na ordem little-endian dentro da palavra. No ambiente UVM (M3.1), o agente de memória ocupa o lugar de `imem` e `dmem` e carrega os mesmos `.hex` do jeito dele. Para o Verilator enxergar o vetor a partir do testbench, `mem` leva o atributo em comentário `/* verilator public */`, que os demais simuladores ignoram.
+
+### 12.3 Regras
+
+- Configuração de referência: a da coluna "Padrão", com todas as extensões ligadas, 64 KiB e 128 KiB, reset em `0x0000_0000` e zero wait states. É a configuração da demonstração (M4.4), da regressão principal (M3.4) e da versão congelada `rtl-v1.0` (M2.5). As demais combinações têm de funcionar; o plano de verificação da M3.3 decide quais entram na regressão e com que profundidade, e no mínimo entram `EN_C = 0` (risco R2) e wait states diferentes de zero (seção 10).
+- Extensão desligada: vale a seção 9.5. A instrução de uma extensão desligada é decodificada como instrução ilegal, com `mtval` igual aos bits da instrução, e o `misa` reflete os parâmetros (seção 9.1).
+- Multiplicador: se a seção 6 compartilhar o multiplicador entre `mul` e `mac`, ele existe sempre que `EN_M = 1` ou `EN_XQNN = 1`. `EN_M = 0` não pode retirar o multiplicador de que a `mac` precisa.
+- Latência do multiplicador e do divisor: escolha de projeto fixada na seção 6, não parâmetro. Parametrizá-la dobraria os casos de verificação do caminho mais delicado do pipeline.
+- ISS: tudo que muda o comportamento visível ao programa, `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE` e `DMEM_SIZE`, é configurável no ISS com o mesmo significado e os mesmos padrões; a sintaxe da linha de comando é da M3.2. Wait states não entram, porque não mudam o comportamento arquitetural.
+- Nomenclatura: parâmetros em maiúsculas com sublinhado; sinais, módulos e instâncias em minúsculas com sublinhado, como nas seções 10 e 11.
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 13. Histórico de versões
 
@@ -597,3 +631,4 @@ A decidir:
 | 0.6 | 2026-11-16 | Lucas Lares | Seções 4.3 e 4.4: semântica de `sat` (largura em `rs2[4:0]`, `n = 0` identidade, `rs2[31:5]` ignorado) e de `relu` (não lê `rs2`); codificações reservadas do `custom-0` como instrução ilegal; nova 4.5 com efeitos no pipeline e a sequência de requantização (D7). |
 | 0.7 | 2026-11-16 | Lucas Lares | Seção 9: mecanismo de trap em modo máquina tomado no EX, tabela de CSRs, exceções com códigos e `mtval`, `mret`, contadores e instruções de sistema (D8). Fechados os itens que dependiam da 9 nas seções 2, 4, 8, 10, 11 e 12; as seções 2, 4, 9, 10 e 11 ficam sem pendências. |
 | 0.8 | 2026-11-16 | Lucas Lares | Seções 1 e 3: escopo com o que está dentro e fora, parâmetros, conformidade e ordem de corte, extensão custom nomeada `Xqnn`; reset com banco zerado e tabela de estado; término pelo `tohost` com o núcleo continuando e o fim no retire do store (D9). Seções 1 e 3 sem pendências. |
+| 0.9 | 2026-11-16 | Lucas Lares | Seção 12: nove parâmetros de `core_top` e `soc_top` com padrões e restrições, nomes das instâncias e do vetor de memória, carga dos `.hex` pelo testbench por referência hierárquica, configuração de referência e regras para extensão desligada, multiplicador e ISS (D10). Seção 12 sem pendências. |
