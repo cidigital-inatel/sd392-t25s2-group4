@@ -4,7 +4,7 @@ Ordem de execução do início ao fim, seguindo as metas do Plano de Trabalho (`
 
 As semanas deste checklist são as do cronograma replanejado, não as 24 do plano. A execução começa em 05/10/2026, a entrega continua em 28/02/2027 e há um recesso de 21/12/2026 a 03/01/2027: são 19 semanas de trabalho, numeradas no calendário abaixo. A ordem das metas e as dependências entre elas são as do plano.
 
-Última atualização: 2026-10-07. Semana atual do projeto: 1, com início em 2026-10-05.
+Última atualização: 2026-11-16. Semana atual do projeto: 7 (16/11 a 22/11/2026); o projeto começou em 2026-10-05.
 
 Etiquetas: `[GES]` gestão · `[RTL]` hardware · `[VER]` verificação e modelo de referência · `[SW]` software, toolchain e IA · `[DOC]` documentação.
 
@@ -102,20 +102,20 @@ Este documento é o contrato entre RTL, ISS, testbench e software. Nada de RTL, 
 
 - [x] Criar `docs/especificacao.md` com as seções: escopo, mapa de memória e periféricos, reset e término, instruções custom, pipeline, extensão M, extensão A, extensão C, CSRs e traps, interface de memória, interface de trace, parâmetros do topo, histórico de versões.
 - [x] Mapa de memória: confirmar bases e tamanhos. Atenção: 100 imagens MNIST de 784 bytes ocupam cerca de 78 KB, mais do que os 64 KiB propostos para a DMEM. Decidir entre DMEM maior ou carga de uma imagem por vez pelo testbench. Decidido: DMEM de 128 KiB (D2 em `docs/decisoes.md`).
-- [x] Periféricos: endereços e semântica do console, do `tohost` e dos espelhos dos contadores; protocolo de término. Definidos na especificação, seção 2; espelhos dos contadores retirados, a confirmar com C.
-- [ ] Instruções custom: tabela de codificação (opcode `0001011`, funct3 `000`/`001`/`010`, funct7 `0000000`), semântica exata de `mac`, `sat` e `relu`, comportamento com `rd = x0`, com `funct3` e `funct7` reservados, e `sat` com `n = 0`.
+- [x] Periféricos: endereços e semântica do console, do `tohost` e dos espelhos dos contadores; protocolo de término. Definidos na especificação, seção 2; espelhos dos contadores retirados, o software lê os contadores por `csrr`.
+- [x] Instruções custom: tabela de codificação (opcode `0001011`, funct3 `000`/`001`/`010`, funct7 `0000000`), semântica exata de `mac`, `sat` e `relu`, comportamento com `rd = x0`, com `funct3` e `funct7` reservados, e `sat` com `n = 0`. Definidos na especificação, seção 4 (D3 e D7); reservados geram instrução ilegal, a fechar com a seção 9.
 - [x] Decisão sobre a leitura de `rd` na MAC: terceira porta de leitura no banco, acumulador dedicado, execução em dois ciclos ou acumulador em `rs1`. Registrar a escolha e o efeito no forwarding. Decidido: acumulador dedicado na unidade custom, exposto como CSR `0x7C0`; a `mac` copia o novo acumulado em `rd` (D3 em `docs/decisoes.md`; especificação, seção 4.2).
-- [ ] Decisão sobre a largura de saturação: registrador (`rs2[4:0]`, como proposto) ou imediato.
-- [ ] Pipeline: estágios, registradores entre estágios, forwarding EX/MEM e MEM/WB, stall de load-use, resolução de desvio em EX com predição não tomado, flush. Diagrama de blocos do pipeline (exigido no aceite).
-- [ ] Extensão M: multiplicação em 1 ou 2 ciclos, divisão multiciclo com stall, compartilhamento ou não do multiplicador com a MAC.
-- [ ] Extensão A: reserva de `lr/sc` e sequência read-modify-write no MEM.
-- [ ] Extensão C: alinhamento de 16 bits, busca que cruza palavra, expansão em ID, habilitação por parâmetro.
-- [ ] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados.
-- [ ] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável.
-- [ ] Interface de trace de retire (estilo RVFI): lista de sinais que o testbench e o ISS comparam (PC, instrução, `rd` e valor, endereço e dado de memória, trap).
-- [ ] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom.
-- [ ] Revisão pelos três membros e aprovação pelo orientador; versão 1.0 registrada.
-- [ ] Aceite M2.1 (plano): especificação versionada, diagrama de blocos do pipeline e tabela de codificação aprovados.
+- [x] Decisão sobre a largura de saturação: registrador (`rs2[4:0]`, como proposto) ou imediato. Decidido: registrador, `n = rs2[4:0]`, com `n = 0` como identidade (D7; especificação, seção 4.3).
+- [x] Pipeline: estágios, registradores entre estágios, forwarding EX/MEM e MEM/WB, stall de load-use, resolução de desvio em EX com predição não tomado, flush. Diagrama de blocos do pipeline (exigido no aceite). Definidos na especificação, seção 5, com o diagrama em Mermaid em 5.1 (D14).
+- [x] Extensão M: multiplicação em 1 ou 2 ciclos, divisão multiciclo com stall, compartilhamento ou não do multiplicador com a MAC. Decidido na especificação, seção 6: multiplicação em um ciclo, divisão com restauração de latência constante e stall, multiplicador próprio da `mac` (D11).
+- [x] Extensão A: reserva de `lr/sc` e sequência read-modify-write no MEM. Definida na especificação, seção 7: reserva de uma palavra invalidada só por `sc.w`, `amo*.w` em duas transações no MEM com ALU própria, `aq`/`rl` ignorados (D12).
+- [x] Extensão C: alinhamento de 16 bits, busca que cruza palavra, expansão em ID, habilitação por parâmetro. Definida na especificação, seção 8: tabela de expansão, buffer de uma meia-palavra no IF com os quatro casos de alinhamento, PC pelo tamanho real, `EN_C = 0` (D13).
+- [x] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados. Definidos na especificação, seção 9: trap em modo máquina com `mtvec`, `mepc`, `mcause`, `mtval`, `mstatus` mínimo e `mret`; `ecall`, `ebreak`, ilegal e desalinhado geram exceção (D8).
+- [x] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável. Definida na especificação, seção 10: portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo (D5).
+- [x] Interface de trace de retire (estilo RVFI): lista de sinais que o testbench e o ISS comparam (PC, instrução, `rd` e valor, endereço e dado de memória, trap). Definida na especificação, seção 11: subconjunto RVFI com fontes, destino, memória e porta genérica de escrita de CSR (D6).
+- [x] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom. Definidos na especificação, seção 12: `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE`, `DMEM_SIZE`, `IMEM_WAIT_STATES`, `DMEM_WAIT_STATES`; carga dos `.hex` pelo testbench (D10).
+- [x] Revisão pelos três membros e aprovação pelo orientador; versão 1.0 registrada. Roteiro da reunião em `docs/roteiro-revisao-especificacao.md`. Aprovada em 2026-11-16; tag `spec-v1.0`.
+- [x] Aceite M2.1 (plano): especificação versionada, diagrama de blocos do pipeline e tabela de codificação aprovados. Concluída em 2026-11-16.
 
 ## Semana 2 a 6 (até 15/11/2026) — M3.1 Ambiente UVM base e smoke test `[VER]`
 
