@@ -110,7 +110,7 @@ Este documento é o contrato entre RTL, ISS, testbench e software. Nada de RTL, 
 - [ ] Extensão M: multiplicação em 1 ou 2 ciclos, divisão multiciclo com stall, compartilhamento ou não do multiplicador com a MAC.
 - [ ] Extensão A: reserva de `lr/sc` e sequência read-modify-write no MEM.
 - [ ] Extensão C: alinhamento de 16 bits, busca que cruza palavra, expansão em ID, habilitação por parâmetro.
-- [ ] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados.
+- [x] CSRs: `mcycle`/`mcycleh`, `minstret`/`minstreth`; decidir se `mstatus`, `mtvec`, `mepc`, `mcause` entram e como `ecall`, `ebreak` e instrução ilegal são tratados. Definidos na especificação, seção 9: trap em modo máquina com `mtvec`, `mepc`, `mcause`, `mtval`, `mstatus` mínimo e `mret`; `ecall`, `ebreak`, ilegal e desalinhado geram exceção (D8).
 - [x] Interface de memória: nome, direção e semântica de cada sinal das portas de instrução e de dados, com handshake que permita latência variável. Definida na especificação, seção 10: portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo (D5).
 - [x] Interface de trace de retire (estilo RVFI): lista de sinais que o testbench e o ISS comparam (PC, instrução, `rd` e valor, endereço e dado de memória, trap). Definida na especificação, seção 11: subconjunto RVFI com fontes, destino, memória e porta genérica de escrita de CSR (D6).
 - [ ] Parâmetros do módulo topo: vetor de reset, tamanhos de memória, habilitação individual de M, A, C e custom.
