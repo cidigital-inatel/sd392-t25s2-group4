@@ -2,7 +2,7 @@
 
 Como preparar uma máquina do zero para trabalhar no projeto. Siga as seções na ordem. Cada ferramenta traz o que é, para que serve, quando instalar, os comandos de instalação e como verificar. Quando uma nova ferramenta entrar no projeto, ela é acrescentada aqui no mesmo passo, com versão e comandos.
 
-Última atualização: 2026-10-04.
+Última atualização: 2026-11-16.
 
 ## 1. Requisitos
 
@@ -48,13 +48,13 @@ A primeira linha deve mostrar `Ubuntu 24.04`; as demais devem responder com uma 
 
 ## 3. Pasta do projeto
 
-O projeto fica no GitHub, em um repositório privado: `https://github.com/lucaslaress/riscv-rv32imac-ci-digital`. Antes de clonar, aceite o convite de colaborador que chega por e-mail.
+O projeto fica no GitHub, no repositório da organização do curso, criado pelo orientador: `https://github.com/cidigital-inatel/sd392-t25s2-group4`. É o único repositório do projeto desde 2026-11-16 (decisão D15 em `docs/decisoes.md`); o repositório pessoal `lucaslaress/riscv-rv32imac-ci-digital`, onde a especificação foi escrita, foi descontinuado, e todo o histórico dele está aqui. Para clonar, é preciso ser membro da equipe na organização; o convite chega por e-mail.
 
 Esta seção é a exceção à regra da seção 2: os comandos abaixo são digitados no PowerShell, dentro da pasta do Windows em que o projeto vai ficar.
 
 ```
-git clone https://github.com/lucaslaress/riscv-rv32imac-ci-digital.git
-cd riscv-rv32imac-ci-digital
+git clone https://github.com/cidigital-inatel/sd392-t25s2-group4.git
+cd sd392-t25s2-group4
 ```
 
 No primeiro acesso, o gerenciador de credenciais do Git for Windows abre o navegador para o login no GitHub. Se o git nunca foi usado nesta máquina, registre também quem assina os commits:
@@ -75,7 +75,7 @@ O primeiro comando deve responder `On branch main` e `nothing to commit, working
 
 Arquivos gerados e arquivos de configuração pessoal de editores e ferramentas ficam fora do repositório, pelo `.gitignore`.
 
-Uma pasta do Windows como `C:\...\riscv-rv32imac-ci-digital` aparece no Ubuntu em `/mnt/c/.../riscv-rv32imac-ci-digital`. Compilações e simulações longas ficam mais rápidas se a pasta estiver dentro do sistema de arquivos do Ubuntu (por exemplo `~/riscv-rv32imac-ci-digital`). Nesse caso, o clone é feito no terminal do Ubuntu, o git de lá precisa de autenticação no GitHub configurada à parte, e a pasta é aberta no VS Code pela extensão WSL.
+Uma pasta do Windows como `C:\...\sd392-t25s2-group4` aparece no Ubuntu em `/mnt/c/.../sd392-t25s2-group4`. Compilações e simulações longas ficam mais rápidas se a pasta estiver dentro do sistema de arquivos do Ubuntu (por exemplo `~/sd392-t25s2-group4`). Nesse caso, o clone é feito no terminal do Ubuntu, o git de lá precisa de autenticação no GitHub configurada à parte, e a pasta é aberta no VS Code pela extensão WSL.
 
 ## 4. Toolchain RISC-V: xPack GNU RISC-V Embedded GCC 15.2.0-1
 
