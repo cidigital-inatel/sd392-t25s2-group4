@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.4, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.5, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -300,14 +300,67 @@ A decidir:
 
 ## 11. Interface de trace de retire
 
-Sinais expostos pelo estágio WB a cada instrução retirada, no estilo RVFI: PC, instrução, `rd` e valor escrito, endereço e dado de memória, indicação de trap. É o que o monitor de trace da M3.1 captura e o que o scoreboard compara com o ISS na M3.2. A mesma tupla define o formato do trace em texto do ISS.
+Define os sinais que o núcleo (`core_top`) expõe a cada instrução retirada, isto é, a cada instrução que completa o estágio WB e torna seus efeitos visíveis ao programa. É o que o monitor de trace da M3.1 captura, o que o scoreboard da M3.2 compara em lock-step com o modelo de referência e a base das asserções de retire da M3.3. A mesma tupla, com os mesmos campos e a mesma semântica, é o que o ISS devolve a cada passo pela interface DPI-C e o que ele imprime no trace em texto. A grafia da linha de texto, ordem e formato dos campos, é da M3.2 e fica documentada em `model/README.md`; esta seção fixa os campos e o significado.
+
+Os nomes, as larguras e a semântica seguem o RVFI (RISC-V Formal Interface, do projeto riscv-formal), no subconjunto da tabela abaixo, acrescido de uma porta genérica de escrita de CSR. Do RVFI completo ficam fora `rvfi_halt`, `rvfi_intr`, `rvfi_mode` e `rvfi_ixl`: a simulação termina pelo `tohost`, não há interrupções, o modo é sempre máquina e a largura é sempre 32. Decisão D6 em `docs/decisoes.md`, com as alternativas descartadas.
+
+### 11.1 Sinais
+
+Todos são saídas do núcleo, registradas no estágio WB, e só têm valor válido no ciclo em que `rvfi_valid = 1`. Nos demais ciclos o valor é indefinido e não deve ser lido.
+
+| Grupo | Sinal | Largura | Semântica |
+|---|---|---|---|
+| Controle | `rvfi_valid` | 1 | Uma instrução retirou neste ciclo. No máximo uma por ciclo, em ordem de programa. |
+| | `rvfi_order` | 64 | Número de ordem da instrução. Vale 0 na primeira instrução retirada após o reset e cresce de 1 em 1, sem pulo nem repetição. |
+| | `rvfi_trap` | 1 | A instrução causou uma exceção (seção 9). |
+| Instrução e PC | `rvfi_insn` | 32 | A instrução como foi buscada. Instrução de 32 bits: a palavra inteira. Instrução comprimida (seção 8): os 16 bits em `[15:0]`, com `[31:16] = 0`; reconhece-se por `rvfi_insn[1:0]` diferente de `11`. |
+| | `rvfi_pc_rdata` | 32 | PC da instrução. |
+| | `rvfi_pc_wdata` | 32 | PC da instrução seguinte em ordem de programa: PC + 4, PC + 2 para comprimida, alvo do desvio ou salto tomado, ou o endereço do tratador quando `rvfi_trap = 1`. |
+| Fontes | `rvfi_rs1_addr`, `rvfi_rs2_addr` | 5, 5 | Registradores fonte lidos, já com a instrução comprimida expandida. 0 quando a instrução não lê aquele fonte. |
+| | `rvfi_rs1_rdata`, `rvfi_rs2_rdata` | 32, 32 | Valores efetivamente usados pela instrução, depois do forwarding. 0 quando o fonte correspondente não é lido. |
+| Destino | `rvfi_rd_addr` | 5 | Registrador escrito. 0 quando a instrução não escreve registrador, inclusive quando o destino codificado é `x0`. |
+| | `rvfi_rd_wdata` | 32 | Valor escrito. 0 quando `rvfi_rd_addr = 0`. |
+| Memória | `rvfi_mem_addr` | 32 | Endereço de byte do acesso de dados, igual ao `dbus_addr` da transação (seção 10). Indefinido quando as duas máscaras são zero. |
+| | `rvfi_mem_rmask`, `rvfi_mem_wmask` | 4, 4 | Bytes lidos e bytes escritos, com a regra de lane de `dbus_be`. Zero quando não houve leitura ou escrita. |
+| | `rvfi_mem_rdata`, `rvfi_mem_wdata` | 32, 32 | Palavra lida e palavra escrita, alinhadas por lane como `dbus_rdata` e `dbus_wdata`. Só os bytes marcados na máscara correspondente têm valor definido e são comparados. |
+| CSR | `rvfi_csr_we` | 1 | A instrução escreveu um CSR. |
+| | `rvfi_csr_addr` | 12 | Endereço do CSR escrito. Indefinido quando `rvfi_csr_we = 0`. |
+| | `rvfi_csr_wdata` | 32 | Valor que ficou no CSR depois da instrução. Indefinido quando `rvfi_csr_we = 0`. |
+
+### 11.2 Regras
+
+1. Retire é a saída do estágio WB. Instrução descartada por flush, seja por desvio tomado, seja por trap de uma instrução mais antiga, nunca aparece no trace. Nos ciclos de stall, `rvfi_valid = 0`.
+2. `rvfi_order` começa em 0 e conta todas as instruções que aparecem no trace, com ou sem trap. `minstret` (seção 9) conta só as com `rvfi_trap = 0`: a cada instante, `minstret` é igual ao número de retires sem trap até ali.
+3. Instrução com `rvfi_trap = 1` aparece uma vez, com `rvfi_rd_addr = 0`, máscaras de memória zero e `rvfi_csr_we = 0`; `rvfi_pc_wdata` é o endereço para onde o PC foi. As escritas que o trap faz nos CSRs de estado (seção 9) não passam pela porta de CSR: são observadas no `csrr` que as ler, e o ISS as faz do mesmo modo.
+4. Porta de CSR: informa a única escrita de CSR que uma instrução pode fazer. `csrrw`, `csrrs`, `csrrc` e as formas com imediato informam o CSR acessado e o valor final, exceto quando a ISA define que não há escrita (`csrrs` e `csrrc` com `rs1 = x0`, `csrrsi` e `csrrci` com imediato zero), caso em que `rvfi_csr_we = 0`. A `mac` (seção 4.2) informa `rvfi_csr_addr = 0x7C0` e o novo valor do `ACC`, mesmo com `rd = x0`: é por aqui que o `ACC` fica visível ao scoreboard a cada `mac`. Leituras de CSR aparecem em `rvfi_rd_wdata`, como qualquer resultado. Os incrementos automáticos de `mcycle` e `minstret` não são escritas e não aparecem.
+5. Extensão A (seção 7): `lr.w` é uma leitura comum. `sc.w` com sucesso informa a escrita e `rvfi_rd_wdata = 0`; `sc.w` que falha informa máscaras zero e `rvfi_rd_wdata = 1`. `amo*.w` informa as duas máscaras em `1111` no mesmo `rvfi_mem_addr`, o valor lido em `rvfi_mem_rdata`, o valor escrito em `rvfi_mem_wdata` e o valor lido em `rvfi_rd_wdata`.
+6. Instruções sem efeito arquitetural, como `nop`, `fence` e `sat` ou `relu` com `rd = x0`, aparecem com `rvfi_rd_addr = 0`, máscaras zero e `rvfi_csr_we = 0`; o que resta é `insn`, `pc_rdata` e `pc_wdata`.
+
+Exemplo com cinco instruções. Campos não mostrados valem zero; traços marcam bytes indefinidos. `a0` é `x10`, `t0` é `x5`, `t1` é `x6`; o `ACC` vale 0 antes da `mac`:
+
+```
+lui  a0, 0x10000    order 0  pc 0x0000_0000  pc_wdata 0x0000_0004  rd x10 = 0x1000_0000
+addi t0, x0, -1     order 1  pc 0x0000_0004  pc_wdata 0x0000_0008  rs1 x0 = 0
+                                                                   rd x5 = 0xFFFF_FFFF
+sh   t0, 2(a0)      order 2  pc 0x0000_0008  pc_wdata 0x0000_000C  rs1 x10 = 0x1000_0000  rs2 x5 = 0xFFFF_FFFF
+                             mem_addr 0x1000_0002  wmask 1100  mem_wdata 0xFFFF_----
+lbu  t1, 3(a0)      order 3  pc 0x0000_000C  pc_wdata 0x0000_0010  rs1 x10 = 0x1000_0000
+                             mem_addr 0x1000_0003  rmask 1000  mem_rdata 0xFF--_----  rd x6 = 0x0000_00FF
+mac  x0, t1, t0     order 4  pc 0x0000_0010  pc_wdata 0x0000_0014  rs1 x6 = 0x0000_00FF   rs2 x5 = 0xFFFF_FFFF
+                             rd x0  csr_we 1  csr_addr 0x7C0  csr_wdata 0xFFFF_FF01
+```
+
+Na `mac`, `0xFF × 0xFFFF_FFFF` módulo 2^32 é `0xFFFF_FF01`, que vai para o `ACC` e aparece na porta de CSR; `rd = x0`, então `rvfi_rd_addr` e `rvfi_rd_wdata` são zero.
+
+### 11.3 Comparação com o modelo de referência
+
+A cada retire, o scoreboard compara `rvfi_insn`, `rvfi_pc_rdata`, `rvfi_pc_wdata`, `rvfi_trap`, os seis campos de fontes e destino, os bytes marcados dos campos de memória e os três campos de CSR. `rvfi_order` é conferido contra o contador do próprio scoreboard. Campos marcados como indefinidos nesta seção não são comparados.
+
+Uma exceção: o valor lido de `mcycle` e `mcycleh` não é verificável por um modelo com precisão de instrução, que não sabe quantos ciclos o pipeline gastou. Antes de o ISS executar uma leitura desses contadores, o testbench entrega a ele o valor que o RTL leu, e o ISS usa esse valor; assim RTL e ISS seguem iguais em `rvfi_rd_wdata` e em tudo o que o programa fizer com esse valor depois, inclusive gravá-lo na memória. A forma de entregar o valor é da interface DPI-C da M3.2. Executando sozinho, sem RTL, o ISS define `mcycle` por uma regra própria e determinística, documentada em `model/README.md`. `minstret` não precisa disso: o ISS conta instruções com exatidão.
 
 A decidir:
 
-- Lista exata de sinais e larguras.
-- Se o trace inclui o valor de `rs1` e `rs2` lidos (RVFI inclui) ou só o resultado.
-- Se o trace inclui escritas de CSR. O `ACC` da `mac` (seção 4.2) aparece em `rd` a cada `mac`, mas uma escrita por `csrw` só é observada na `mac` ou no `csrr` seguinte.
-- Como representar o retire de uma instrução comprimida (instrução de 16 bits ou já expandida).
+- Fechar com a seção 9 o que `rvfi_pc_wdata` informa num trap, o endereço do tratador, e a lista dos CSRs de estado que o trap altera fora da porta de CSR. Se a seção 9 não adotar traps, `rvfi_trap` fica sempre em 0 e permanece na interface por compatibilidade com o RVFI.
 
 ## 12. Parâmetros do topo
 
@@ -326,3 +379,4 @@ A decidir:
 | 0.2 | 2026-10-07 | Lucas Lares | Seção 2 preenchida: regiões, periféricos, protocolo do `tohost` e orçamento da DMEM. |
 | 0.3 | 2026-10-07 | Lucas Lares | Seção 4: codificação das três instruções e semântica da `mac`, com acumulador dedicado exposto como CSR `0x7C0`. |
 | 0.4 | 2026-11-16 | Lucas Lares | Seção 10: interface de memória com as portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo, byte enables alinhados por lane (D5). Seção 8 registra a remontagem das instruções que cruzam a palavra no IF. |
+| 0.5 | 2026-11-16 | Lucas Lares | Seção 11: trace de retire no padrão RVFI, com valores das fontes depois do forwarding, porta genérica de escrita de CSR, instrução comprimida crua e regra de sincronização do `mcycle` com o ISS (D6). |
