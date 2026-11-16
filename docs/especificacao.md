@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.13, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.14, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -26,7 +26,7 @@ Um núcleo RISC-V de 32 bits, único (um hart), em ordem, em pipeline de cinco e
 | `Xqnn` | `mac`, `sat` e `relu` sobre o opcode `custom-0`, mais o CSR `macacc` (seção 4). | parâmetro |
 | Privilegiada | Modo máquina apenas, com o mecanismo de trap, `mret`, `wfi` e os CSRs da seção 9. | sempre |
 
-`Xqnn`, de quantized neural network, é o nome da extensão custom, no formato que a ISA reserva para extensões não padrão: `X` seguido de letras minúsculas. Neste documento, "extensão custom", "unidade custom" e `Xqnn` são a mesma coisa. O nome aparece no bit `X` do `misa` (seção 9.1), no parâmetro de habilitação (seção 12), no nome do módulo em Verilog e na documentação. A toolchain não o conhece: o software emite as instruções com `.insn` (seção 4.1).
+`Xqnn`, de quantized neural network, é o nome da extensão custom, no formato que a ISA reserva para extensões não padrão: `X` seguido de letras minúsculas. Neste documento, "extensão custom", "unidade custom" e `Xqnn` são a mesma coisa; o corpo do texto usa `Xqnn`. O nome aparece no bit `X` do `misa` (seção 9.1), no parâmetro de habilitação `EN_XQNN` (seção 12), no nome do módulo em Verilog, `xqnn_unit`, dentro de `core_top`, e na documentação. A toolchain não o conhece: o software emite as instruções com `.insn` (seção 4.1).
 
 ### 1.2 O que está fora
 
@@ -80,7 +80,7 @@ O endereço de 32 bits é decodificado pelos quatro bits mais altos, `addr[31:28
 |---|---|---|---|---|---|
 | IMEM | `0x0` | `0x0000_0000` | 64 KiB | Instruções | Só busca de instruções |
 | DMEM | `0x1` | `0x1000_0000` | 128 KiB | Dados | Leitura e escrita de 8, 16 e 32 bits |
-| Periféricos | `0x2` | `0x2000_0000` | 4 palavras | Dados | Leitura e escrita de 32 bits (ver abaixo) |
+| Periféricos | `0x2` | `0x2000_0000` | 4 palavras, fixo | Dados | Palavras de 32 bits com byte enables (ver abaixo) |
 | Demais | `0x3` a `0xF` | | | | Fora do mapa |
 
 Regras:
@@ -88,7 +88,7 @@ Regras:
 - **Harvard estrita.** A porta de instruções enxerga só a IMEM; a porta de dados enxerga só a DMEM e os periféricos. Para o software (M4.1), o linker script põe `.text` na IMEM e `.rodata`, `.data` e `.bss` na DMEM. Como o testbench e o ISS carregam os dois `.hex` antes do reset, o `crt0` não copia `.data`; só zera `.bss`. Consequência para a verificação: o teste `fence_i` dos `rv32ui` escreve na memória de instruções e fica fora da suíte (Zifencei não está no escopo).
 - **Tamanhos parametrizáveis.** IMEM e DMEM são parâmetros do topo (seção 12) com os padrões da tabela, iguais no RTL e no ISS. O tamanho é sempre potência de dois.
 - **DMEM de 128 KiB.** O plano propôs 64 KiB; 128 KiB é a menor potência de dois que comporta a demonstração com 100 imagens residentes, conforme o orçamento abaixo. Decisão D2 em `docs/decisoes.md`.
-- **Fora do mapa.** Acesso a uma região não mapeada, ou além do tamanho configurado da IMEM, da DMEM ou dos periféricos: a leitura devolve 0 e a escrita é ignorada, no RTL e no ISS, sem exceção, porque a interface de memória não tem sinal de erro (seção 10) e a seção 9 não define exceções de acesso. O testbench acusa qualquer acesso desses como erro do teste. Uma busca de instrução fora do mapa devolve a palavra zero, que é instrução ilegal (seção 9): um salto para o nada vira trap.
+- **Fora do mapa.** Acesso a uma região não mapeada, além do tamanho configurado da IMEM ou da DMEM, ou além das 4 palavras dos periféricos: a leitura devolve 0 e a escrita é ignorada, no RTL e no ISS, sem exceção, porque a interface de memória não tem sinal de erro (seção 10) e a seção 9 não define exceções de acesso. O testbench acusa qualquer acesso desses como erro do teste. Uma busca de instrução fora do mapa devolve a palavra zero, que é instrução ilegal (seção 9): um salto para o nada vira trap.
 
 Orçamento da DMEM para a demonstração MNIST (estimativas; a M4.3 confirma os valores da rede):
 
@@ -98,7 +98,7 @@ Orçamento da DMEM para a demonstração MNIST (estimativas; a M4.3 confirma os 
 | Pesos e vieses da CNN (poucos milhares de parâmetros) | ~6 KiB |
 | Ativações em int8, requantizadas a cada saída (sem buffer int32) | ~10 KiB |
 | `.data`, `.bss` e pilha | ~8 KiB |
-| Total | ~102 KiB de 128 KiB |
+| Total | ~101 KiB de 128 KiB |
 
 Os vetores de referência camada a camada (cerca de 9 KiB por imagem) não cabem para as 100 imagens; a comparação camada a camada da M4.4 é feita em poucas imagens ou fora do processador, a partir da memória lida pelo testbench.
 
@@ -110,7 +110,7 @@ Periféricos. Cada registrador se comporta como uma palavra de memória de 32 bi
 | `0x2000_0004` | `tohost` | Retorna o último valor escrito (0 após o reset) | Com bit 0 = 1, encerra a simulação com código `valor >> 1`; o valor `1` é sucesso. Com bit 0 = 0, só armazena |
 | `0x2000_0008`, `0x2000_000C` | reservados | Retorna 0 | Ignorada |
 
-O protocolo do `tohost` é o dos `riscv-tests` e do Spike: `RVTEST_PASS` escreve `1` e `RVTEST_FAIL` escreve `(número_do_teste << 1) | 1`. Os testes rodam sem alteração no RTL, no ISS e no Spike, com o mesmo código de término. O Spike não tem o `console` neste endereço; a M4.1 decide como os programas imprimem lá.
+O protocolo do `tohost` é o dos `riscv-tests` e do Spike: `RVTEST_PASS` escreve `1` e `RVTEST_FAIL` escreve `(número_do_teste << 1) | 1`. Os fontes dos testes rodam sem alteração no RTL, no ISS e no Spike, com o mesmo código de término; o que a M4.1 adapta é o ambiente, linker script e `riscv_test.h` (seção 1.4). O Spike não tem o `console` neste endereço; a M4.1 decide como os programas imprimem lá.
 
 Não há espelhos dos contadores nos periféricos: o software lê `mcycle` e `minstret` com `csrr` (seção 9), como a HAL da M4.1 já prevê. Decisão D4 em `docs/decisoes.md`.
 
@@ -130,13 +130,14 @@ Estado após o reset:
 |---|---|---|
 | PC | vetor de reset: `0x0000_0000` por padrão, parâmetro | seção 12 |
 | `x1` a `x31` | 0 | esta seção |
-| CSRs | 0, inclusive `mstatus` (`MIE = 0`, `MPIE = 0`), `mtvec`, `mepc`, `mcause`, `mtval`, `mscratch`, `mcycle`/`mcycleh` e `minstret`/`minstreth`; `misa` e os de identificação são constantes | seção 9.1 |
+| CSRs | 0 em `mtvec`, `mepc`, `mcause`, `mtval`, `mscratch`, `mcycle`/`mcycleh` e `minstret`/`minstreth`; `mstatus` lê `0x0000_1800`, isto é, `MIE = 0`, `MPIE = 0` e `MPP` fixo em `11`; `misa` e os de identificação são constantes | seção 9.1 |
 | `ACC` (`macacc`) | 0 | seção 4.2 |
 | Reserva de `lr.w`/`sc.w` | inválida | seção 7 |
-| Pipeline e buffer de busca | vazios | seções 5 e 8 |
+| Pipeline, buffer de busca e registrador de espera do IF | vazios | seções 5 e 8 |
 | IMEM e DMEM | não são afetadas pelo reset. O testbench e o ISS as carregam dos `.hex` antes de soltar o reset; `.rodata` e `.data` já estão na DMEM quando o programa começa | seção 2 |
+| `tohost` | 0; o `console` não tem estado | seção 2 |
 
-O banco de registradores é zerado no reset, e o ISS faz o mesmo. Uma SRAM real acordaria com conteúdo indefinido, mas em simulação registrador não inicializado vale X, enquanto no ISS vale 0: qualquer leitura antes de escrita, por exemplo num programa aleatório da M3.3, divergiria no scoreboard sem haver defeito, e o X poderia se espalhar pelo pipeline e poluir o trace. Zerar custa um reset em 31 registradores e elimina essa fonte de ruído. Com `mtvec = 0`, um trap antes de o software programá-lo salta para o vetor de reset; por isso o `crt0` escreve `mtvec` antes de tudo (seção 9.3).
+O banco de registradores é zerado no reset, e o ISS faz o mesmo. Uma SRAM real acordaria com conteúdo indefinido, mas em simulação registrador não inicializado vale X, enquanto no ISS vale 0: qualquer leitura antes de escrita, por exemplo num programa aleatório da M3.3, divergiria no scoreboard sem haver defeito, e o X poderia se espalhar pelo pipeline e poluir o trace. Zerar custa um reset em 31 registradores e elimina essa fonte de ruído. Com `mtvec = 0`, um trap antes de o software programá-lo salta para o endereço 0, que coincide com o vetor de reset só na configuração padrão; por isso o `crt0` escreve `mtvec` antes de tudo (seção 9.3).
 
 ### 3.2 Término
 
@@ -149,7 +150,7 @@ Um programa termina escrevendo no `tohost` (`0x2000_0004`, seção 2) um valor c
 
 A decidir: nada. Seção pronta para revisão.
 
-## 4. Instruções custom
+## 4. Instruções `Xqnn`
 
 As três instruções para redes neurais quantizadas: `mac`, `sat` e `relu`. Esta seção é a base para o RTL (M2.4), o ISS (M3.2), os intrínsecos (M4.2) e os covergroups (M3.3). A codificação e a semântica partem da tabela 4.1.3 do plano de trabalho; o que o plano deixou em aberto é fechado aqui.
 
@@ -175,7 +176,7 @@ Regras comuns às três:
 
 ### 4.2 `mac`: multiplicação e acumulação
 
-A unidade custom tem um registrador interno de 32 bits, o acumulador `ACC`, zerado no reset. O software o enxerga como o CSR `macacc`, endereço `0x7C0`, dentro da faixa `0x7C0` a `0x7FF` que a especificação RISC-V reserva para CSRs do projetista em modo máquina, com leitura e escrita pelas instruções Zicsr padrão.
+A unidade `Xqnn` tem um registrador interno de 32 bits, o acumulador `ACC`, zerado no reset. O software o enxerga como o CSR `macacc`, endereço `0x7C0`, dentro da faixa `0x7C0` a `0x7FF` que a especificação RISC-V reserva para CSRs do projetista em modo máquina, com leitura e escrita pelas instruções Zicsr padrão.
 
 ```
 ACC ← (ACC + rs1 × rs2) mod 2^32
@@ -191,12 +192,12 @@ rd  ← ACC                         (valor novo)
 - Referência em C (M4.2), com `acc` representando o `ACC`: `acc = (uint32_t)acc + (uint32_t)a * (uint32_t)b; rd = (int32_t)acc;`. Aritmética sem sinal para o overflow não ser comportamento indefinido em C.
 - Na aplicação, a soma de produtos int8 × int8 fica longe de 2^31: um filtro 3 × 3 sobre 16 canais soma 144 produtos de módulo até 2^14, menos de 2^22, mais um viés. O wrap-around existe para a semântica ser completa e determinística, não porque ocorra em uso normal.
 
-Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acessa o acumulador. Decisão: **acumulador dedicado na unidade custom, exposto como CSR**, registrada como D3 em `docs/decisoes.md`.
+Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acessa o acumulador. Decisão: **acumulador dedicado na unidade `Xqnn`, exposto como CSR**, registrada como D3 em `docs/decisoes.md`.
 
 - O banco de registradores continua com duas portas de leitura e uma de escrita. A `mac` lê `rs1` e `rs2` como qualquer R-type e escreve `rd` pelo caminho normal de WB, participando do forwarding como produtora.
-- O `ACC` fica na unidade custom, no estágio EX. A `mac` lê o `ACC` e o escreve na borda de relógio do mesmo ciclo em EX, então `mac` consecutivas se encadeiam sem forwarding nem stall.
+- O `ACC` fica na unidade `Xqnn`, no estágio EX. A `mac` lê o `ACC` e o escreve na borda de relógio do mesmo ciclo em EX, então `mac` consecutivas se encadeiam sem forwarding nem stall.
 - Os acessos ao `ACC` pelas instruções Zicsr também executam em EX, em ordem de programa, logo não há hazard entre `csrw`, `csrr` e `mac` além do que a ordem do pipeline já garante.
-- A escrita do `ACC` acontece no EX quando a instrução é válida e o estágio avança (seção 5). Como o trap é tomado no EX pela própria instrução e o flush só atinge IF e ID, nada mais velho anula uma instrução que já está no EX; uma bolha ou uma casca de trap no EX não escreve o `ACC`.
+- A escrita do `ACC` acontece no EX quando a instrução é válida e o estágio avança (seções 5.3 e 5.6). Como o trap é tomado no EX pela própria instrução e o flush só atinge IF e ID, nada mais velho anula uma instrução que já está no EX; uma bolha ou uma casca de trap no EX não escreve o `ACC`.
 - Requisito para a seção 6, atendido: a latência da `mac` é a da `mul`, um ciclo (seção 6.1), e `mac` consecutivas nunca param. A unidade `Xqnn` tem o próprio multiplicador, de 32 × 32 para 32 bits (seção 6.3). A alternativa com multiplicador de dois ciclos, em que a `mac` faria o produto no primeiro e a soma no `ACC` no segundo e `rd` ficaria pronto um estágio depois, como um load, foi descartada em D11.
 - Motivo da escolha e alternativas descartadas: D3.
 
@@ -287,7 +288,7 @@ Define a organização do núcleo em cinco estágios, IF, ID, EX, MEM e WB: o qu
 flowchart LR
     subgraph S_IF["IF: busca"]
         PC["PC e PC seguinte"]
-        ALIGN["Alinhador<br/>buffer de 16 bits"]
+        ALIGN["Alinhador<br/>buffer de 16 bits e registrador de espera"]
     end
     R1[["IF/ID"]]
     subgraph S_ID["ID: decodificação"]
@@ -345,9 +346,10 @@ flowchart LR
     HZ -. congela ou bolha .-> R2
     HZ -. congela ou bolha .-> R3
     HZ -. congela ou bolha .-> R4
+    HZ -. congela .-> PC
 ```
 
-Legenda: caixas de borda simples são blocos de lógica, com ou sem estado próprio; caixas de borda dupla são os registradores de pipeline; caixas arredondadas são as portas da seção 10 e o trace da seção 11. Setas cheias são o fluxo da instrução; setas tracejadas são forwarding, redirecionamento do PC e controle de stall e flush. O diagrama é desenhado pelo GitHub a partir do texto; para o documento do TCC ele é exportado para imagem na M5.2.
+Legenda: caixas de borda simples são blocos de lógica, com ou sem estado próprio; caixas com barras laterais duplas são os registradores de pipeline; caixas arredondadas são as portas da seção 10 e o trace da seção 11; LSU é a unidade de load e store do estágio MEM. Setas cheias são o fluxo da instrução; setas tracejadas são forwarding, redirecionamento do PC e controle de stall e flush. O diagrama é desenhado pelo GitHub a partir do texto; para o documento do TCC ele é exportado para imagem na M5.2.
 
 ### 5.2 Os estágios
 
@@ -355,7 +357,7 @@ Legenda: caixas de borda simples são blocos de lógica, com ou sem estado próp
 |---|---|---|
 | IF | Mantém o PC. Busca pela porta `ibus_` a palavra alinhada do PC e a recebe no mesmo ciclo. Com a extensão C, aplica os quatro casos de alinhamento com o buffer de uma meia-palavra e entrega ao ID uma instrução de 16 ou 32 bits com a marca de tamanho. Calcula o PC seguinte em sequência, PC + 2 ou PC + 4. No redirecionamento, descarta o buffer e recomeça no alvo. Quando está congelado por uma parada mais adiante e uma busca em curso termina, guarda a palavra num registrador de espera e baixa `ibus_valid`; congelado, não emite busca nova. | 8, 10 |
 | ID | Expande a instrução comprimida. Decodifica: unidade que executa, operandos lidos (marcas "lê `rs1`" e "lê `rs2`"), `rd` e habilitação, acesso à memória e tamanho, CSR, desvio. Lê `rs1` e `rs2` no banco. Monta o imediato. Marca o que a seção 9 define como ilegal e as instruções `ecall`, `ebreak`, `mret`, `wfi` e `fence`. Detecta o load-use (5.4). | 8, 9 |
-| EX | Seletores de forwarding escolhem os operandos reais. ALU. Comparação e alvo de desvios, com predição estática de não tomado. Multiplicador de um ciclo. Divisor multiciclo, que para o pipeline. Unidade `Xqnn` com o `ACC` e multiplicador próprio. Unidade de CSRs: leitura e escrita em ordem de programa, `mcycle`, `minstret`, `macacc` e os de trap. Endereço de memória e checagem de alinhamento. Tomada do trap e `mret`. É o único ponto de redirecionamento do PC. | 4, 6, 9 |
+| EX | Seletores de forwarding escolhem os operandos reais. ALU. Comparação e alvo de desvios, com predição estática de não tomado. Multiplicador de um ciclo. Divisor multiciclo, que para o pipeline. Unidade `Xqnn` com o `ACC` e multiplicador próprio. Unidade de CSRs: leitura e escrita em ordem de programa, `mcycle`, `minstret`, `macacc` e os de trap. Endereço de memória e checagem de alinhamento. Tomada do trap e `mret`. É o único ponto de redirecionamento do PC. | 4, 6, 9, 10 |
 | MEM | Transação na porta `dbus_` com lanes e byte enables; extração do lane e extensão de sinal. `amo*.w` em duas transações com a ALU própria. Registrador de reserva e decisão do `sc.w`. Nunca gera exceção: o alinhamento foi checado no EX. | 7, 10 |
 | WB | Escreve `rd` no banco. Retire: expõe o trace `rvfi_*`, registrado neste estágio, e mantém `rvfi_order`. | 11 |
 
@@ -386,10 +388,10 @@ Cada registrador tem um bit de validade. Além do que a execução precisa, eles
 
 | Registrador | Para a execução | Para o trace e o trap |
 |---|---|---|
-| IF/ID | PC, instrução crua de 16 ou 32 bits, marca de tamanho | |
+| IF/ID | PC, instrução crua de 16 ou 32 bits, marca de tamanho | nada além do que a execução já leva |
 | ID/EX | PC, instrução expandida, sinais de controle, valores de `rs1` e `rs2` lidos do banco, endereços de `rs1`, `rs2` e `rd`, habilitação de `rd`, imediato, endereço de CSR | instrução crua, marca de tamanho, marcas de ilegal, `ecall`, `ebreak`, `mret` e o `mtval` candidato (bits da instrução) |
-| EX/MEM | PC, controle de memória (tipo, tamanho, sinal), endereço de memória, dado de store ou operando de `amo` já com forwarding, resultado (ALU, multiplicador, divisor, `Xqnn` ou leitura de CSR), endereço e habilitação de `rd` | instrução crua, tamanho, valores de `rs1` e `rs2` depois do forwarding, PC seguinte, marca de trap, escrita de CSR feita no EX (habilitação, endereço, valor) |
-| MEM/WB | PC, dado para `rd` (resultado ou dado lido já extraído), endereço e habilitação de `rd` | tudo o que o trace precisa: instrução crua, `rs1` e `rs2` com valores, PC seguinte, marca de trap, endereço, máscaras e dados de memória, escrita de CSR |
+| EX/MEM | PC, controle de memória (tipo, tamanho, sinal), endereço de memória, dado de store ou operando de `amo` já com forwarding, resultado (ALU, multiplicador, divisor, `Xqnn` ou leitura de CSR), endereço e habilitação de `rd` | instrução crua, tamanho, endereços de `rs1` e `rs2` com as marcas de leitura e os valores depois do forwarding, PC seguinte, marca de trap, escrita de CSR feita no EX (habilitação, endereço, valor) |
+| MEM/WB | PC, dado para `rd` (resultado ou dado lido já extraído), endereço e habilitação de `rd` | tudo o que o trace precisa: instrução crua, `rs1` e `rs2` com endereços, marcas de leitura e valores, PC seguinte, marca de trap, endereço, máscaras e dados de memória, escrita de CSR |
 
 Bolhas e cascas:
 
@@ -404,7 +406,7 @@ Quando uma instrução no EX lê um registrador que uma instrução anterior ain
 |---|---|---|
 | 1, instruções consecutivas | MEM | EX/MEM |
 | 2 | WB | MEM/WB |
-| 3 | escreveu o banco neste ciclo | o banco, transparente à escrita: uma leitura do registrador escrito no mesmo ciclo devolve o valor novo |
+| 3 | já escreveu o banco, no ciclo anterior, quando o consumidor estava no ID | o banco, lido no ID com transparência à escrita: uma leitura do registrador que está sendo escrito no mesmo ciclo devolve o valor novo |
 | 4 ou mais | já escreveu | leitura normal do banco |
 
 Regras do forwarding:
@@ -469,9 +471,9 @@ Em sinais, com `stall_mem` igual a transação da `dbus_` pendente ou segunda tr
 | EX/MEM | `stall_mem` | `stall_ex` sem `stall_mem` | EX completou e MEM livre | não |
 | ID/EX | `stall_ex` | `stall_load_use` sem `stall_ex` | ID completou e EX livre | sim |
 | IF/ID | `stall_id` | IF sem instrução completa, sem `stall_id` | IF entregou e ID livre | sim |
-| PC | `stall_id`, salvo redirecionamento | | IF entregou e ID livre | recebe o alvo |
+| PC | `stall_id` ou IF sem instrução completa, salvo redirecionamento | não se aplica | IF entregou e ID livre | recebe o alvo |
 
-Consequências já fixadas nas outras seções: o IF congelado guarda a palavra recebida e baixa `ibus_valid` (seção 10, regra 5); o EX só redireciona o PC no ciclo em que avança, então um desvio com o MEM parado espera (seções 6.2, 7.3 e 9.3); a divisão e a sequência das `amo*.w` não são interrompíveis.
+Consequências já fixadas nas outras seções: o IF congelado guarda a palavra recebida e baixa `ibus_valid` (seção 10, regra 5); o EX só redireciona o PC no ciclo em que avança, então um desvio com o MEM parado espera (5.5); a divisão e a sequência das `amo*.w` não são interrompíveis (seções 6.2, 7.3 e 9.3).
 
 ### 5.7 Custo em ciclos
 
@@ -483,7 +485,7 @@ Com zero wait states, o núcleo retira uma instrução por ciclo, menos nos even
 | Alvo em `4k + 2` que começa instrução de 32 bits | mais 1 |
 | Load-use, inclusive `lr.w`, `sc.w`, `amo*.w` como produtor e store ou `amo*.w` como consumidor | 1 |
 | `amo*.w` | 1 |
-| Divisão | latência fixa da seção 6.2 menos 1 |
+| Divisão | latência constante da seção 6.2 menos 1 |
 | Wait state em qualquer porta | 1 por ciclo de espera, por acesso |
 
 A decidir: nada. Seção pronta para revisão.
@@ -523,7 +525,7 @@ Casos especiais, definidos pela ISA, sem exceção:
 | `rs1 = −2^31` e `rs2 = −1` | `0x8000_0000`, isto é −2^31 | não se aplica | 0 | não se aplica |
 
 - Multiciclo com stall, no estágio EX: a instrução fica no EX enquanto o divisor trabalha; IF, ID e EX param, e MEM e WB terminam o que tinham (seção 5). Ao fim do stall o resultado entra no forwarding e no WB como o de qualquer R-type.
-- Latência constante, independente dos operandos, inclusive na divisão por zero e no overflow: toda divisão ocupa o EX pelo mesmo número de ciclos, no máximo 40. O valor exato é documentado em `rtl/README.md` e medido na M4.4. Não há saída antecipada.
+- Latência constante, independente dos operandos, inclusive na divisão por zero e no overflow: toda divisão ocupa o EX pelo mesmo número de ciclos, no máximo 40. O valor exato é fixado nesta seção, como atualização de versão da especificação, quando o RTL da M2.3 estiver pronto, e é medido na M4.4; até lá, a constância e o teto são o contrato. Não há saída antecipada.
 - Implementação: divisão com restauração, um bit do quociente por ciclo, 32 iterações sobre os módulos dos operandos, com conserto de sinal no fim: quociente negativo se os sinais diferem, resto com o sinal do dividendo. Com divisor zero, a iteração sem sinal dá naturalmente quociente `0xFFFF_FFFF` e resto igual ao dividendo, que é o resultado de `divu` e `remu`; o overflow com sinal também sai certo pelo conserto de sinal, porque `0x8000_0000 ÷ 1` dá `0x8000_0000` e negá-lo dá o mesmo valor. A divisão por zero com sinal é o único caso tratado à parte: o conserto de sinal transformaria o −1 em 1.
 - O RTL não usa os operadores `/` e `%` do Verilog, que gerariam um divisor combinacional; eles só aparecem no testbench e no ISS.
 - A divisão não é interrompível: nada mais novo pode descartar a instrução em EX, e nada mais velho pode gerar trap, porque o trap é tomado no EX (seção 9.3). Um wait state da memória durante a divisão só prolonga o stall.
@@ -607,7 +609,7 @@ Uma instrução é de 16 bits quando seus bits `[1:0]`, o quadrante, são difere
 | `01`, `010` | `c.li rd, imm` | `addi rd, x0, imm` | como `c.addi` | `rd = 0` HINT |
 | `01`, `011`, `rd = 2` | `c.addi16sp nzimm` | `addi x2, x2, nzimm` | `[12]→[9]`, `[6]→[4]`, `[5]→[6]`, `[4:3]→[8:7]`, `[2]→[5]`, com sinal | `nzimm = 0` reservado |
 | `01`, `011`, `rd ≠ 2` | `c.lui rd, nzimm` | `lui rd, nzimm` | `[12]→[17]`, `[6:2]→[16:12]`, com sinal | `nzimm = 0` reservado; `rd = 0` HINT |
-| `01`, `100`, `[11:10] = 00` | `c.srli rd', shamt` | `srli rd', rd', shamt` | `[12]→[5]`, `[6:2]→[4:0]` | `shamt[5] = 1` reservado em RV32; `shamt = 0` HINT |
+| `01`, `100`, `[11:10] = 00` | `c.srli rd', shamt` | `srli rd', rd', shamt` | `[12]→[5]`, `[6:2]→[4:0]` | `shamt[5] = 1` designado pela ISA a extensões não padrão, aqui ilegal; `shamt = 0` HINT |
 | `01`, `100`, `[11:10] = 01` | `c.srai rd', shamt` | `srai rd', rd', shamt` | como `c.srli` | como `c.srli` |
 | `01`, `100`, `[11:10] = 10` | `c.andi rd', imm` | `andi rd', rd', imm` | como `c.addi` | |
 | `01`, `100`, `[12:10] = 011`, `[6:5] = 00`, `01`, `10`, `11` | `c.sub`, `c.xor`, `c.or`, `c.and rd', rs2'` | `sub`, `xor`, `or`, `and rd', rd', rs2'` | | |
@@ -615,7 +617,7 @@ Uma instrução é de 16 bits quando seus bits `[1:0]`, o quadrante, são difere
 | `01`, `101` | `c.j offset` | `jal x0, offset` | como `c.jal` | |
 | `01`, `110` | `c.beqz rs1', offset` | `beq rs1', x0, offset` | `[12]→[8]`, `[11:10]→[4:3]`, `[6:5]→[7:6]`, `[4:3]→[2:1]`, `[2]→[5]`, com sinal | |
 | `01`, `111` | `c.bnez rs1', offset` | `bne rs1', x0, offset` | como `c.beqz` | |
-| `10`, `000` | `c.slli rd, shamt` | `slli rd, rd, shamt` | como `c.srli` | `shamt[5] = 1` reservado em RV32; `rd = 0` e `shamt = 0` HINT |
+| `10`, `000` | `c.slli rd, shamt` | `slli rd, rd, shamt` | como `c.srli` | `shamt[5] = 1` designado pela ISA a extensões não padrão, aqui ilegal; `rd = 0` e `shamt = 0` HINT |
 | `10`, `010` | `c.lwsp rd, uimm` | `lw rd, uimm(x2)` | `[12]→[5]`, `[6:4]→[4:2]`, `[3:2]→[7:6]`, sem sinal | `rd = 0` reservado |
 | `10`, `100`, `[12] = 0`, `rs2 = 0` | `c.jr rs1` | `jalr x0, 0(rs1)` | | `rs1 = 0` reservado |
 | `10`, `100`, `[12] = 0`, `rs2 ≠ 0` | `c.mv rd, rs2` | `add rd, x0, rs2` | | `rd = 0` HINT |
@@ -627,7 +629,7 @@ Uma instrução é de 16 bits quando seus bits `[1:0]`, o quadrante, são difere
 
 São 26 instruções implementadas. Regras:
 
-- Codificação reservada, ou de ponto flutuante, é instrução ilegal: exceção de código 2 com `mtval` igual aos 16 bits, com `[31:16] = 0` (seção 9.2).
+- Codificação reservada, designada a extensões não padrão, ou de ponto flutuante, é instrução ilegal: exceção de código 2 com `mtval` igual aos 16 bits, com `[31:16] = 0` (seção 9.2).
 - HINT expande literalmente. O resultado é uma instrução com destino `x0` ou deslocamento zero, que não tem efeito arquitetural; ela retira, conta em `minstret` e aparece no trace como qualquer outra.
 - No trace, `rvfi_insn` traz os 16 bits crus, com `[31:16] = 0`, e os campos de registradores trazem os valores já expandidos (seção 11).
 
@@ -642,7 +644,7 @@ A porta de instruções é sempre de palavra inteira (seção 10): o IF busca a 
 | 3 | `4k + 2` | `A_hi[1:0] ≠ 11` | `A_hi`, 16 bits | nada |
 | 4 | `4k + 2` | `A_hi[1:0] = 11` | `{B_lo, A_hi}`, 32 bits; precisa de B | `B_hi` vai para o buffer |
 
-O IF tem um buffer de uma meia-palavra: 16 bits e um bit de validade. Regras:
+O IF tem dois elementos de estado além do PC: o buffer de busca, uma meia-palavra de 16 bits com um bit de validade, e o registrador de espera, uma palavra de 32 bits com um bit de validade, que guarda a palavra recebida da memória quando o IF está congelado por uma parada mais adiante no pipeline e não pode entregá-la (seção 5.6). Os dois nascem vazios no reset (seção 3) e são esvaziados no redirecionamento. Regras do buffer:
 
 - Buffer vazio: o IF busca a palavra alinhada do PC e aplica o caso 1, 2, 3 ou 4. No caso 4 com buffer vazio, que só ocorre logo depois de um redirecionamento para um endereço `4k + 2`, `A_hi` vai para o buffer e B é buscada no ciclo seguinte: é a única situação em que uma instrução custa duas buscas, com uma bolha no ID.
 - Buffer cheio, com a metade alta da palavra anterior, que é a instrução no PC atual: se ela é de 16 bits, caso 3, o IF a entrega sem buscar nada e o buffer esvazia. Se ela é o começo de uma de 32 bits, caso 4, o IF busca a palavra seguinte, entrega `{B_lo, A_hi}` e guarda `B_hi` no buffer.
@@ -659,7 +661,7 @@ O IF tem um buffer de uma meia-palavra: 16 bits e um bit de validade. Regras:
 
 ### 8.4 Parâmetro `EN_C`
 
-Com `EN_C = 0` (seção 12): o buffer de busca e o expansor são removidos, cada palavra buscada é uma instrução, qualquer palavra com `[1:0] ≠ 11` é instrução ilegal, o PC é sempre múltiplo de 4, `mepc[1]` fica fixo em 0, e um desvio tomado ou salto para endereço que não é múltiplo de 4 gera a exceção de código 0 com `mtval` igual ao alvo (seção 9.2). Nessa configuração o núcleo é um RV32IMA completo. Se a extensão C for cortada (risco R2), o corte é uma mudança de escopo registrada na seção 3 de `docs/decisoes.md`, e a configuração de referência da seção 12.3 passa a ter `EN_C = 0`.
+Com `EN_C = 0` (seção 12): o buffer de busca e o expansor são removidos, cada palavra buscada é uma instrução, qualquer palavra com `[1:0] ≠ 11` é instrução ilegal e, como não há instrução comprimida, `mtval` e `rvfi_insn` levam a palavra de 32 bits inteira; o PC é sempre múltiplo de 4, `mepc[1]` fica fixo em 0, e um desvio tomado ou salto para endereço que não é múltiplo de 4 gera a exceção de código 0 com `mtval` igual ao alvo (seção 9.2). Nessa configuração o núcleo é um RV32IMA com Zicsr e `Xqnn`. Se a extensão C for cortada (risco R2), o corte é uma mudança de escopo registrada na seção 3 de `docs/decisoes.md`, e a configuração de referência da seção 12.3 passa a ter `EN_C = 0`.
 
 ### 8.5 Verificação
 
@@ -675,8 +677,8 @@ Define o estado de controle do núcleo: a lista dos CSRs implementados, com ende
 
 | Endereço | Nome | Acesso | Bits implementados e comportamento | Reset |
 |---|---|---|---|---|
-| `0x300` | `mstatus` | leitura e escrita | `MIE` (bit 3) e `MPIE` (bit 7) graváveis; `MPP` (bits 12:11) fixo em `11`. Os demais bits leem 0 e ignoram escrita. Fora do trap e do `mret`, `MIE` não tem efeito, porque não há interrupções. | `MIE = 0`, `MPIE = 0` |
-| `0x301` | `misa` | constante | `MXL = 01` (bits 31:30); `I` (bit 8) sempre 1; `M` (bit 12), `A` (bit 0) e `C` (bit 2) iguais aos parâmetros de habilitação da seção 12; `X` (bit 23) igual ao parâmetro da extensão custom. Com tudo habilitado, `0x4080_1105`. Escrita ignorada. | constante |
+| `0x300` | `mstatus` | leitura e escrita | `MIE` (bit 3) e `MPIE` (bit 7) graváveis; `MPP` (bits 12:11) fixo em `11`. Os demais bits leem 0 e ignoram escrita. Fora do trap e do `mret`, `MIE` não tem efeito, porque não há interrupções. | `0x0000_1800`: `MIE = 0`, `MPIE = 0`, `MPP = 11` |
+| `0x301` | `misa` | constante | `MXL = 01` (bits 31:30); `I` (bit 8) sempre 1; `M` (bit 12), `A` (bit 0) e `C` (bit 2) iguais aos parâmetros de habilitação da seção 12; `X` (bit 23) igual a `EN_XQNN`, o parâmetro da extensão `Xqnn`. Com tudo habilitado, `0x4080_1105`. Escrita ignorada. | constante |
 | `0x304` | `mie` | lê 0 | Escrita ignorada. | 0 |
 | `0x305` | `mtvec` | leitura e escrita | `BASE` (bits 31:2) gravável; `MODE` (bits 1:0) fixo em `00`, modo direto. | 0 |
 | `0x310` | `mstatush` | lê 0 | Escrita ignorada. | 0 |
@@ -688,21 +690,21 @@ Define o estado de controle do núcleo: a lista dos CSRs implementados, com ende
 | `0xB00`, `0xB80` | `mcycle`, `mcycleh` | leitura e escrita | Contador de 64 bits de ciclos (9.4). | 0 |
 | `0xB02`, `0xB82` | `minstret`, `minstreth` | leitura e escrita | Contador de 64 bits de instruções retiradas (9.4). | 0 |
 | `0xF11` a `0xF15` | `mvendorid`, `marchid`, `mimpid`, `mhartid`, `mconfigptr` | lê 0 | Só leitura pelo endereço: escrita é instrução ilegal. `mhartid = 0` porque há um só núcleo. | constante |
-| `0x7C0` | `macacc` | leitura e escrita | 32 bits, o `ACC` da `mac` (seção 4.2). | 0 |
+| `0x7C0` | `macacc` | leitura e escrita | 32 bits, o `ACC` da `mac` (seção 4.2). Só existe com `EN_XQNN = 1` (seção 12); com a extensão desligada, acessá-lo é instrução ilegal. | 0 |
 
 Regras de acesso:
 
 - Qualquer CSR fora da tabela não existe, e acessá-lo, por leitura ou escrita, é instrução ilegal. Inclui `medeleg` e `mideleg` (não há modo supervisor), `mcounteren` (não há modo usuário), `mcountinhibit`, `menvcfg`, os `mhpmcounter*` e `mhpmevent*`, e as sombras sem privilégio `cycle`, `time`, `instret`, `cycleh`, `timeh` e `instreth` (`0xC00` a `0xC02` e `0xC80` a `0xC82`). O software lê os contadores por `mcycle` e `minstret` (seção 2).
-- Escrita em endereço de `0xC00` a `0xFFF` é instrução ilegal, pela própria codificação do endereço. Escrita em CSR da tabela marcado "lê 0" ou "constante" é aceita e ignorada.
+- Escrita em endereço de `0xC00` a `0xFFF` é instrução ilegal, pela própria codificação do endereço; é o caso dos cinco CSRs de identificação. Nos demais CSRs da tabela marcados "lê 0" ou "constante", `misa`, `mie`, `mstatush` e `mip`, a escrita é aceita e ignorada.
 - `csrrs` e `csrrc` com `rs1 = x0`, e `csrrsi` e `csrrci` com imediato zero, não escrevem (ISA): não disparam a ilegalidade de escrita e não aparecem na porta de CSR do trace (seção 11). `csrrw` e `csrrwi` escrevem sempre, mesmo com `rd = x0`.
-- As instruções Zicsr executam no estágio EX, em ordem de programa, e uma escrita de CSR vale para a instrução seguinte (seção 4.2). O `macacc` fica na unidade custom, mas segue as mesmas regras.
+- As instruções Zicsr executam no estágio EX, em ordem de programa, e uma escrita de CSR vale para a instrução seguinte (seção 4.2). O `macacc` fica na unidade `Xqnn`, mas segue as mesmas regras.
 
 ### 9.2 Exceções
 
 | Código em `mcause` | Exceção | Quando o núcleo a gera | `mtval` |
 |---|---|---|---|
 | 0 | Endereço de instrução desalinhado | Só com a extensão C desligada: desvio condicional tomado, `jal` ou `jalr` cujo alvo não é múltiplo de 4. A exceção é da instrução de desvio ou salto. Com C ligada nunca ocorre: `jalr` zera o bit 0 do alvo e todo deslocamento é múltiplo de 2. | O alvo |
-| 2 | Instrução ilegal | Codificação que não é de RV32I, da Zicsr, de uma extensão habilitada (M, A, C, custom) nem das instruções de 9.5; codificação reservada do `custom-0` (seção 4.1); `lr.w` com o campo `rs2` diferente de zero e qualquer `funct5` ou `funct3` fora da tabela da seção 7.1 no opcode AMO; instrução de extensão desligada por parâmetro; acesso a CSR inexistente ou escrita em CSR só de leitura; e as palavras `0x0000_0000` e `0xFFFF_FFFF`, que a ISA define como ilegais. | Os bits da instrução: 32 bits para uma instrução de 32 bits; para uma comprimida, os 16 bits em `[15:0]` com `[31:16] = 0`, como em `rvfi_insn`. |
+| 2 | Instrução ilegal | Codificação que não é de RV32I, da Zicsr, de uma extensão habilitada (M, A, C, `Xqnn`) nem das instruções de 9.5; codificação reservada do `custom-0` (seção 4.1); `lr.w` com o campo `rs2` diferente de zero e qualquer `funct5` ou `funct3` fora da tabela da seção 7.1 no opcode AMO; instrução de extensão desligada por parâmetro; acesso a CSR inexistente ou escrita em CSR só de leitura; e as palavras `0x0000_0000` e `0xFFFF_FFFF`, que a ISA define como ilegais. | Os bits da instrução: 32 bits para uma instrução de 32 bits; para uma comprimida, o que só existe com `EN_C = 1`, os 16 bits em `[15:0]` com `[31:16] = 0`, como em `rvfi_insn`. |
 | 3 | Breakpoint | `ebreak` e `c.ebreak`. | O PC do `ebreak` |
 | 4 | Load desalinhado | `lw` e `lr.w` com `addr[1:0]` diferente de `00`; `lh` e `lhu` com `addr[0] = 1` (seção 10.3). | O endereço |
 | 6 | Store ou AMO desalinhado | `sw`, `sc.w` e `amo*.w` com `addr[1:0]` diferente de `00`; `sh` com `addr[0] = 1`. | O endereço |
@@ -729,13 +731,13 @@ PC           <- mtvec.BASE          bits 1:0 em zero
 - As instruções mais novas que já estavam no pipeline são descartadas, como num desvio tomado. O trap é tomado no estágio EX, o mesmo ponto em que os desvios se resolvem e em que as escritas de CSR executam: a ilegalidade, o `ecall` e o `ebreak` são detectados no ID e carregados até o EX; o desalinhamento é calculado no EX, antes de a transação de memória ser emitida no MEM. Consequência para a seção 5: há um só ponto de redirecionamento do PC, e toda instrução que passa do EX sem trap retira com certeza.
 - `mret`: `PC <- mepc`, `mstatus.MIE <- mstatus.MPIE`, `mstatus.MPIE <- 1`, `MPP` continua `11`. É um salto incondicional com flush, como `jalr`. No trace, `rvfi_pc_wdata = mepc`; a alteração de `mstatus` segue a mesma regra das escritas do trap e não passa pela porta de CSR.
 - Trap dentro do tratador sobrescreve `mepc`, `mcause` e `mtval`, como manda a ISA; o tratador que quiser preservá-los salva antes, por exemplo em `mscratch`.
-- `mtvec` vale 0 após o reset. Um trap antes de o software programá-lo salta para o vetor de reset. Recomendação para a M4.1, não requisito do núcleo: o `crt0` escreve `mtvec` antes de qualquer outra coisa, apontando para um tratador de depuração que imprime `mcause`, `mepc` e `mtval` no console e encerra pelo `tohost` com código de falha.
+- `mtvec` vale 0 após o reset. Um trap antes de o software programá-lo salta para o endereço 0, que coincide com o vetor de reset só quando `RESET_VECTOR = 0`. Recomendação para a M4.1, não requisito do núcleo: o `crt0` escreve `mtvec` antes de qualquer outra coisa, apontando para um tratador de depuração que imprime `mcause`, `mepc` e `mtval` no console e encerra pelo `tohost` com código de falha.
 
 ### 9.4 Contadores
 
-- `mcycle` e `mcycleh` formam um contador de 64 bits que incrementa a cada ciclo de relógio a partir da saída do reset, inclusive durante stalls, e nunca para. Uma leitura devolve o valor do contador no ciclo em que a instrução está no EX. Esse valor não é verificável pelo ISS; a seção 11.3 diz como o testbench o entrega a ele.
-- `minstret` e `minstreth` formam um contador de 64 bits que incrementa a cada instrução retirada sem trap (seção 11, regra 2). As instruções custom contam uma cada; instruções descartadas por flush e instruções que sofrem trap não contam. Uma leitura devolve o número de instruções retiradas antes dela em ordem de programa. Nota de implementação: como o trap é tomado no EX, toda instrução que sai do EX sem trap retira; o RTL pode incrementar o contador na saída do EX, e então a leitura feita no EX já devolve o valor certo, sem corrigir pelas instruções em voo no MEM e no WB.
-- Escrita pelo software: `csrrw`, `csrrs`, `csrrc` e as formas com imediato gravam a metade endereçada, baixa ou alta, e o contador segue dali. Em `minstret`, o valor escrito prevalece e a instrução que escreve não é contada: logo depois de `csrw minstret, zero`, `minstret` vale 0. Esta regra é confirmada contra o Spike na M3.2; se o Spike divergir, prevalece o Spike e esta linha é corrigida.
+- `mcycle` e `mcycleh` formam um contador de 64 bits que incrementa a cada ciclo de relógio a partir da saída do reset, inclusive durante stalls, e nunca para. Uma leitura devolve o valor do contador no ciclo em que a instrução sai do EX, o último se o EX ficar parado. Esse valor não é verificável pelo ISS; a seção 11.3 diz como o testbench o entrega a ele.
+- `minstret` e `minstreth` formam um contador de 64 bits que incrementa a cada instrução retirada sem trap (seção 11, regra 2). As instruções `Xqnn` contam uma cada; instruções descartadas por flush e instruções que sofrem trap não contam. Uma leitura devolve o número de instruções retiradas antes dela em ordem de programa. Implementação, fixada aqui e na seção 5.2: como o trap é tomado no EX, toda instrução que sai do EX sem trap retira; o contador incrementa na saída do EX, e a leitura feita no EX devolve o valor certo sem corrigir pelas instruções em voo no MEM e no WB.
+- Escrita pelo software: `csrrw`, `csrrs`, `csrrc` e as formas com imediato gravam a metade endereçada, baixa ou alta, e o contador segue dali. Em `minstret`, o valor escrito prevalece e a instrução que escreve não é contada: logo depois de `csrw minstret, zero`, `minstret` vale 0. É o que a ISA manda para escritas em `instret` e o que o Spike implementa, compensando o próprio incremento na escrita; a M3.2 confere como teste normal.
 
 ### 9.5 Instruções de sistema e fora do conjunto
 
@@ -756,7 +758,7 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 10. Interface de memória
 
-Define as duas portas pelas quais o núcleo (`core_top`) acessa tudo o que está fora dele: a porta de instruções, prefixo `ibus_`, e a porta de dados, prefixo `dbus_`. Para cada sinal, nome, direção, largura e semântica; o protocolo de handshake; as regras de alinhamento e de byte enables; e o que o núcleo faz enquanto espera. É o contrato entre o núcleo, as memórias e os periféricos de `soc_top` (M2.2, itens da pessoa C) e o agente de memória do ambiente UVM (M3.1), que ocupa o lugar das memórias no testbench. O modelo de referência não implementa o protocolo: ele enxerga os acessos pelo trace de retire (seção 11). A escolha de qual região atende cada endereço é do decodificador de `soc_top`, pela seção 2, e não do núcleo.
+Define as duas portas pelas quais o núcleo (`core_top`) acessa tudo o que está fora dele: a porta de instruções, prefixo `ibus_`, e a porta de dados, prefixo `dbus_`. Para cada sinal, nome, direção, largura e semântica; o protocolo de handshake; as regras de alinhamento e de byte enables; e o que o núcleo faz enquanto espera. É o contrato entre o núcleo, as memórias e os periféricos de `soc_top` (M2.2, itens da pessoa C) e o agente de memória do ambiente UVM (M3.1), que ocupa o lugar das memórias no testbench. O modelo de referência não implementa o protocolo: executa os acessos na própria memória e os expõe no trace de retire (seção 11), onde o scoreboard os compara com os do RTL. A escolha de qual região atende cada endereço é do decodificador de `soc_top`, pela seção 2, e não do núcleo.
 
 Decisão D5 em `docs/decisoes.md`: protocolo `valid`/`ready` de uma fase, com o dado de leitura no mesmo ciclo do `ready`, e porta de instruções alinhada a palavra. Alternativas descartadas: D5.
 
@@ -887,16 +889,16 @@ Todos são saídas do núcleo, registradas no estágio WB, e só têm valor vál
 | | `rvfi_mem_rdata`, `rvfi_mem_wdata` | 32, 32 | Palavra lida e palavra escrita, alinhadas por lane como `dbus_rdata` e `dbus_wdata`. Só os bytes marcados na máscara correspondente têm valor definido e são comparados. |
 | CSR | `rvfi_csr_we` | 1 | A instrução escreveu um CSR. |
 | | `rvfi_csr_addr` | 12 | Endereço do CSR escrito. Indefinido quando `rvfi_csr_we = 0`. |
-| | `rvfi_csr_wdata` | 32 | Valor que ficou no CSR depois da instrução. Indefinido quando `rvfi_csr_we = 0`. |
+| | `rvfi_csr_wdata` | 32 | Valor escrito no CSR pela instrução: o resultado final em `csrrs` e `csrrc`, o valor de `rs1` ou do imediato em `csrrw` e `csrrwi`, o novo `ACC` na `mac`. Em `mcycle` e `minstret`, o valor gravado, antes de o contador seguir contando. Indefinido quando `rvfi_csr_we = 0`. |
 
 ### 11.2 Regras
 
-1. Retire é a saída do estágio WB. Instrução descartada por flush, seja por desvio tomado, seja por trap de uma instrução mais antiga, nunca aparece no trace. Nos ciclos de stall, `rvfi_valid = 0`.
-2. `rvfi_order` começa em 0 e conta todas as instruções que aparecem no trace, com ou sem trap. `minstret` (seção 9) conta só as com `rvfi_trap = 0`: a cada instante, `minstret` é igual ao número de retires sem trap até ali.
-3. Instrução com `rvfi_trap = 1` aparece uma vez, com `rvfi_rd_addr = 0`, máscaras de memória zero e `rvfi_csr_we = 0`; `rvfi_pc_wdata` é o endereço para onde o PC foi. As escritas que o trap faz nos CSRs de estado (seção 9) não passam pela porta de CSR: são observadas no `csrr` que as ler, e o ISS as faz do mesmo modo.
-4. Porta de CSR: informa a única escrita de CSR que uma instrução pode fazer. `csrrw`, `csrrs`, `csrrc` e as formas com imediato informam o CSR acessado e o valor final, exceto quando a ISA define que não há escrita (`csrrs` e `csrrc` com `rs1 = x0`, `csrrsi` e `csrrci` com imediato zero), caso em que `rvfi_csr_we = 0`. A `mac` (seção 4.2) informa `rvfi_csr_addr = 0x7C0` e o novo valor do `ACC`, mesmo com `rd = x0`: é por aqui que o `ACC` fica visível ao scoreboard a cada `mac`. Leituras de CSR aparecem em `rvfi_rd_wdata`, como qualquer resultado. Os incrementos automáticos de `mcycle` e `minstret` não são escritas e não aparecem.
+1. Retire é a saída do estágio WB. Instrução descartada por flush, seja por desvio tomado, seja por trap de uma instrução mais antiga, nunca aparece no trace. Em ciclos em que o WB não tem instrução válida, por exemplo quando recebe uma bolha, `rvfi_valid = 0`; um stall em estágios anteriores não impede o retire do que já está no WB (seção 5.6).
+2. `rvfi_order` começa em 0 e conta todas as instruções que aparecem no trace, com ou sem trap. `minstret` (seção 9) conta só as com `rvfi_trap = 0`. A relação é arquitetural, não ciclo a ciclo: o valor que um `csrr` de `minstret` devolve é o número de instruções sem trap retiradas antes dele em ordem de programa; como o contador incrementa na saída do EX (seção 9.4), num dado ciclo ele pode estar até duas instruções à frente dos retires já vistos no WB.
+3. Instrução com `rvfi_trap = 1` aparece uma vez, com `rvfi_rd_addr = 0`, máscaras de memória zero e `rvfi_csr_we = 0`; os campos de `rs1` e `rs2` são indefinidos e não comparados; `rvfi_pc_wdata` é o endereço para onde o PC foi. As escritas que o trap faz nos CSRs de estado (seção 9) não passam pela porta de CSR: são observadas no `csrr` que as ler, e o ISS as faz do mesmo modo.
+4. Porta de CSR: informa a única escrita de CSR que uma instrução pode fazer pela via normal. As escritas de estado do trap em `mepc`, `mcause`, `mtval` e `mstatus`, e a de `mstatus` pelo `mret`, não passam por ela (regra 3 e seção 9.3). `csrrw`, `csrrs`, `csrrc` e as formas com imediato informam o CSR acessado e o valor final, exceto quando a ISA define que não há escrita (`csrrs` e `csrrc` com `rs1 = x0`, `csrrsi` e `csrrci` com imediato zero), caso em que `rvfi_csr_we = 0`. A `mac` (seção 4.2) informa `rvfi_csr_addr = 0x7C0` e o novo valor do `ACC`, mesmo com `rd = x0`: é por aqui que o `ACC` fica visível ao scoreboard a cada `mac`. Leituras de CSR aparecem em `rvfi_rd_wdata`, como qualquer resultado. Os incrementos automáticos de `mcycle` e `minstret` não são escritas e não aparecem.
 5. Extensão A (seção 7): `lr.w` é uma leitura comum. `sc.w` com sucesso informa a escrita e `rvfi_rd_wdata = 0`; `sc.w` que falha informa máscaras zero e `rvfi_rd_wdata = 1`. `amo*.w` informa as duas máscaras em `1111` no mesmo `rvfi_mem_addr`, o valor lido em `rvfi_mem_rdata`, o valor escrito em `rvfi_mem_wdata` e o valor lido em `rvfi_rd_wdata`.
-6. Instruções sem efeito arquitetural, como `nop`, `fence` e `sat` ou `relu` com `rd = x0`, aparecem com `rvfi_rd_addr = 0`, máscaras zero e `rvfi_csr_we = 0`; o que resta é `insn`, `pc_rdata` e `pc_wdata`.
+6. Instruções sem efeito arquitetural, como `nop`, `fence` e `sat` ou `relu` com `rd = x0`, aparecem com `rvfi_rd_addr = 0`, máscaras zero e `rvfi_csr_we = 0`; o que resta é `insn`, `pc_rdata`, `pc_wdata` e os fontes que a instrução lê, por exemplo `rs1` e `rs2` na `sat` e só `rs1` na `relu`.
 
 Exemplo com cinco instruções. Campos não mostrados valem zero; traços marcam bytes indefinidos. `a0` é `x10`, `t0` é `x5`, `t1` é `x6`; o `ACC` vale 0 antes da `mac`:
 
@@ -924,13 +926,13 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 12. Parâmetros do topo
 
-Define os parâmetros Verilog dos módulos `core_top`, só o núcleo, e `soc_top`, o núcleo mais `imem`, `dmem` e `periph`: nome, tipo, valor padrão, efeito e restrições. Define também os nomes das instâncias de `soc_top` e do vetor de memória de `imem` e `dmem`, que o testbench usa para carregar os programas. Um parâmetro é fixado na instanciação, não em tempo de execução; o `soc_top` expõe todos os parâmetros e repassa ao `core_top` os que são dele. Decisão D10 em `docs/decisoes.md`, com as alternativas descartadas.
+Define os parâmetros Verilog dos módulos `core_top`, só o núcleo, e `soc_top`, o núcleo mais `imem`, `dmem` e `periph`: nome, tipo, valor padrão, efeito e restrições. Define também o nome da instância de `soc_top` no testbench, os nomes das instâncias dentro de `soc_top` e o do vetor de memória de `imem` e `dmem`, que o testbench usa para carregar os programas. Um parâmetro é fixado na instanciação, não em tempo de execução; o `soc_top` expõe todos os parâmetros e repassa ao `core_top` os que são dele. Decisão D10 em `docs/decisoes.md`, com as alternativas descartadas.
 
 ### 12.1 Parâmetros
 
 | Parâmetro | Módulo | Tipo | Padrão | Efeito e restrições |
 |---|---|---|---|---|
-| `RESET_VECTOR` | `core_top` | inteiro de 32 bits | `32'h0000_0000` | PC após o reset (seção 3). Múltiplo de 4 e dentro da região da IMEM (seção 2). |
+| `RESET_VECTOR` | `core_top` | inteiro de 32 bits | `32'h0000_0000` | PC após o reset (seção 3). Múltiplo de 4 e na região da IMEM, `[31:28] = 0`, o que o `core_top` confere; o `soc_top` confere ainda que é menor que `IMEM_SIZE`. |
 | `EN_M` | `core_top` | 0 ou 1 | 1 | Extensão M (seção 6). Com 0, `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem` e `remu` são instrução ilegal e o bit `M` do `misa` lê 0. |
 | `EN_A` | `core_top` | 0 ou 1 | 1 | Extensão A (seção 7). Com 0, `lr.w`, `sc.w` e `amo*.w` são instrução ilegal e o bit `A` do `misa` lê 0. |
 | `EN_C` | `core_top` | 0 ou 1 | 1 | Extensão C (seção 8). Com 0, toda instrução de 16 bits é instrução ilegal, o PC alinha a 4, `mepc[1]` fica fixo em 0, alvo de desvio ou salto não múltiplo de 4 gera o código 0 (seção 9) e o bit `C` do `misa` lê 0. |
@@ -942,9 +944,11 @@ Define os parâmetros Verilog dos módulos `core_top`, só o núcleo, e `soc_top
 
 Tamanhos em bytes, e não em palavras ou em bits de endereço, porque é a unidade da tabela da seção 2, do linker script (M4.1) e da configuração do ISS. Cada memória calcula internamente quantos bits de endereço usa a partir do tamanho; a restrição de potência de dois é o que permite isso.
 
-Valores fora das restrições, tamanho que não é potência de dois, vetor de reset desalinhado ou fora da IMEM, `EN_*` diferente de 0 e 1, são erro de elaboração: o módulo acusa com uma mensagem e encerra a simulação com `$finish` em um bloco `initial`, em vez de gerar hardware errado em silêncio.
+Valores fora das restrições, tamanho que não é potência de dois, vetor de reset desalinhado, fora da região ou além de `IMEM_SIZE`, `EN_*` diferente de 0 e 1, são erro na inicialização da simulação: o módulo que conhece a restrição acusa com uma mensagem e encerra com `$finish` em um bloco `initial`, no instante zero, em vez de simular hardware errado em silêncio.
 
 ### 12.2 Instâncias e carga das memórias
+
+A instância de `soc_top` no testbench, local ou UVM, chama-se `u_soc`. Dentro dela:
 
 | Instância em `soc_top` | Módulo | Conteúdo |
 |---|---|---|
@@ -953,14 +957,14 @@ Valores fora das restrições, tamanho que não é potência de dois, vetor de r
 | `u_dmem` | `dmem` | Memória de dados: `reg [31:0] mem [0:DMEM_SIZE/4-1]`, indexada por `dbus_addr` sem os dois bits baixos; byte enables aplicados na escrita (seção 10). |
 | `u_periph` | `periph` | `console` e `tohost` (seção 2). |
 
-As memórias não carregam arquivo nenhum sozinhas e não leem a linha de comando. Quem carrega é o testbench, antes de soltar o reset, com `$readmemh` direto no vetor, por referência hierárquica: `$readmemh(arquivo, soc_top.u_imem.mem)` e o mesmo para `u_dmem`. O nome do arquivo vem de `plusargs` do testbench, por exemplo `+imem=` e `+dmem=`, de modo que o mesmo RTL compilado roda qualquer programa sem recompilar. O formato do `.hex` é o da M4.1: uma palavra de 32 bits por linha, em ordem crescente de endereço a partir da base da região, com os bytes na ordem little-endian dentro da palavra. No ambiente UVM (M3.1), o agente de memória ocupa o lugar de `imem` e `dmem` e carrega os mesmos `.hex` do jeito dele. Para o Verilator enxergar o vetor a partir do testbench, `mem` leva o atributo em comentário `/* verilator public */`, que os demais simuladores ignoram.
+As memórias não carregam arquivo nenhum sozinhas e não leem a linha de comando. Quem carrega é o testbench, antes de soltar o reset, com `$readmemh` direto no vetor, por referência hierárquica: `$readmemh(arquivo, u_soc.u_imem.mem)` e o mesmo para `u_dmem`. O nome do arquivo vem de `plusargs` do testbench, por exemplo `+imem=` e `+dmem=`, de modo que o mesmo RTL compilado roda qualquer programa sem recompilar. O formato do `.hex` é o da M4.1: uma palavra de 32 bits por linha, em ordem crescente de endereço a partir da base da região, com os bytes na ordem little-endian dentro da palavra. No ambiente UVM (M3.1), o agente de memória ocupa o lugar de `imem` e `dmem` e carrega os mesmos `.hex` do jeito dele. Para o Verilator enxergar o vetor a partir do testbench, `mem` leva o atributo em comentário `/* verilator public */`, que os demais simuladores ignoram.
 
 ### 12.3 Regras
 
 - Configuração de referência: a da coluna "Padrão", com todas as extensões ligadas, 64 KiB e 128 KiB, reset em `0x0000_0000` e zero wait states. É a configuração da demonstração (M4.4), da regressão principal (M3.4) e da versão congelada `rtl-v1.0` (M2.5). As demais combinações têm de funcionar; o plano de verificação da M3.3 decide quais entram na regressão e com que profundidade, e no mínimo entram `EN_C = 0` (risco R2) e wait states diferentes de zero (seção 10).
 - Extensão desligada: vale a seção 9.5. A instrução de uma extensão desligada é decodificada como instrução ilegal, com `mtval` igual aos bits da instrução, e o `misa` reflete os parâmetros (seção 9.1).
 - Multiplicador: cada unidade tem o seu (seção 6.3). O multiplicador de 33 × 33 da extensão M existe com `EN_M = 1`; o de 32 × 32 da `mac` existe com `EN_XQNN = 1`. `EN_M = 0` não afeta a `mac`.
-- Latência do multiplicador e do divisor: escolha de projeto fixada na seção 6, não parâmetro. Parametrizá-la dobraria os casos de verificação do caminho mais delicado do pipeline.
+- Latência do multiplicador e do divisor: escolha de projeto da seção 6, constante, não parâmetro. Parametrizá-la dobraria os casos de verificação do caminho mais delicado do pipeline.
 - ISS: tudo que muda o comportamento visível ao programa, `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE` e `DMEM_SIZE`, é configurável no ISS com o mesmo significado e os mesmos padrões; a sintaxe da linha de comando é da M3.2. Wait states não entram, porque não mudam o comportamento arquitetural.
 - Nomenclatura: parâmetros em maiúsculas com sublinhado; sinais, módulos e instâncias em minúsculas com sublinhado, como nas seções 10 e 11.
 
@@ -973,6 +977,7 @@ A decidir: nada. Seção pronta para revisão.
 | 0.1 | 2026-10-07 | Lucas Lares | Esqueleto com as seções e os pontos a decidir. |
 | 0.2 | 2026-10-07 | Lucas Lares | Seção 2 preenchida: regiões, periféricos, protocolo do `tohost` e orçamento da DMEM. |
 | 0.3 | 2026-10-07 | Lucas Lares | Seção 4: codificação das três instruções e semântica da `mac`, com acumulador dedicado exposto como CSR `0x7C0`. |
+| 0.3 | 2026-10-08 | Lucas Lares | Seção 2: decisão D4 registrada, sem espelhos dos contadores nos periféricos; item correspondente retirado de "A decidir". |
 | 0.4 | 2026-11-16 | Lucas Lares | Seção 10: interface de memória com as portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo, byte enables alinhados por lane (D5). Seção 8 registra a remontagem das instruções que cruzam a palavra no IF. |
 | 0.5 | 2026-11-16 | Lucas Lares | Seção 11: trace de retire no padrão RVFI, com valores das fontes depois do forwarding, porta genérica de escrita de CSR, instrução comprimida crua e regra de sincronização do `mcycle` com o ISS (D6). |
 | 0.6 | 2026-11-16 | Lucas Lares | Seções 4.3 e 4.4: semântica de `sat` (largura em `rs2[4:0]`, `n = 0` identidade, `rs2[31:5]` ignorado) e de `relu` (não lê `rs2`); codificações reservadas do `custom-0` como instrução ilegal; nova 4.5 com efeitos no pipeline e a sequência de requantização (D7). |
@@ -983,3 +988,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.11 | 2026-11-16 | Lucas Lares | Seção 7: codificação das onze instruções da extensão A, reserva de uma palavra invalidada só por `sc.w`, `amo*.w` em duas transações no MEM com ALU própria, `aq` e `rl` ignorados (D12). `lr.w` com `rs2` não nulo e codificações fora da tabela acrescentados aos ilegais da 9.2. Seção 7 sem pendências. |
 | 0.12 | 2026-11-16 | Lucas Lares | Seção 8: tabela das 26 instruções RV32C com equivalentes, imediatos, reservados e HINTs; busca com buffer de uma meia-palavra e os quatro casos de alinhamento; expansão em ID e avanço do PC pelo tamanho real; `EN_C = 0`; verificação (D13). Seção 8 sem pendências. |
 | 0.13 | 2026-11-16 | Lucas Lares | Seção 5: diagrama de blocos em Mermaid, estágios e tabela de onde cada evento acontece, registradores de pipeline com bolhas e cascas de trap, forwarding e load-use, flush, propagação das paradas em tabela de sinais e custo em ciclos (D14). Frase do `ACC` em 4.2 ajustada. Todas as treze seções sem pendências: documento pronto para a revisão da versão 1.0. |
+| 0.14 | 2026-11-16 | Lucas Lares | Revisão de coerência do documento inteiro, sem decisão nova: reset do `mstatus` em `0x1800`; escrita nos CSRs só de leitura; fontes no trace em instruções sem efeito e com trap; `minstret` e `rvfi_valid` em relação a stalls; `macacc` condicionado a `EN_XQNN`; registrador de espera do IF na 3.1, na 8.2 e no diagrama; `mret` e a porta de CSR; `rvfi_csr_wdata` e leitura de `mcycle` em contadores; `EN_C = 0` em `mtval`; `mtvec` zero; restrições de `RESET_VECTOR` por módulo; instância `u_soc`; tabelas da 5.3, 5.4 e 5.6; seta da unidade de hazards ao PC; periféricos; `riscv-tests`; orçamento da DMEM; linha da D4 no histórico. Latência do divisor fixada na 6.2 quando o RTL existir; regra de escrita em `minstret` fechada pela ISA e pelo Spike; nome `Xqnn` unificado no corpo do texto. |
