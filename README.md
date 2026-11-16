@@ -1,5 +1,7 @@
 # Processador RISC-V RV32IMAC com extensões para redes neurais quantizadas
 
+Repositório da equipe `sd392-t25s2-group4`.
+
 Trabalho de conclusão de curso da 2ª turma do programa CI Digital (polo Inatel), setembro de 2026 a fevereiro de 2027.
 
 Processador RISC-V de 32 bits compatível com RV32IMAC, em pipeline de cinco estágios, descrito em Verilog e estendido com três instruções customizadas para redes neurais quantizadas: multiplicação e acumulação (`mac`), saturação (`sat`) e ativação ReLU (`relu`). A verificação é feita em simulação com UVM no Cadence Xcelium, comparando o processador instrução a instrução com um modelo de referência em C. A demonstração é a classificação de dígitos MNIST em int8 rodando no próprio processador, em duas versões, com e sem as extensões, para medir o ganho em ciclos e instruções.
