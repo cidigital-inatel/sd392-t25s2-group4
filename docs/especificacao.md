@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.12, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.13, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -196,7 +196,7 @@ Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acess
 - O banco de registradores continua com duas portas de leitura e uma de escrita. A `mac` lê `rs1` e `rs2` como qualquer R-type e escreve `rd` pelo caminho normal de WB, participando do forwarding como produtora.
 - O `ACC` fica na unidade custom, no estágio EX. A `mac` lê o `ACC` e o escreve na borda de relógio do mesmo ciclo em EX, então `mac` consecutivas se encadeiam sem forwarding nem stall.
 - Os acessos ao `ACC` pelas instruções Zicsr também executam em EX, em ordem de programa, logo não há hazard entre `csrw`, `csrr` e `mac` além do que a ordem do pipeline já garante.
-- A escrita do `ACC` obedece ao mesmo sinal de descarte que as demais escritas de estado: se a instrução em EX for anulada por flush ou por trap de uma instrução mais antiga (seção 9), o `ACC` não muda.
+- A escrita do `ACC` acontece no EX quando a instrução é válida e o estágio avança (seção 5). Como o trap é tomado no EX pela própria instrução e o flush só atinge IF e ID, nada mais velho anula uma instrução que já está no EX; uma bolha ou uma casca de trap no EX não escreve o `ACC`.
 - Requisito para a seção 6, atendido: a latência da `mac` é a da `mul`, um ciclo (seção 6.1), e `mac` consecutivas nunca param. A unidade `Xqnn` tem o próprio multiplicador, de 32 × 32 para 32 bits (seção 6.3). A alternativa com multiplicador de dois ciclos, em que a `mac` faria o produto no primeiro e a soma no `ACC` no segundo e `rd` ficaria pronto um estágio depois, como um load, foi descartada em D11.
 - Motivo da escolha e alternativas descartadas: D3.
 
@@ -279,14 +279,214 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 5. Pipeline
 
-Os cinco estágios (IF, ID, EX, MEM, WB), o conteúdo dos registradores entre estágios, a unidade de hazards (forwarding EX/MEM e MEM/WB para EX, stall de load-use), a resolução de desvios e o flush. Inclui o diagrama de blocos do pipeline, exigido no aceite da M2.1.
+Define a organização do núcleo em cinco estágios, IF, ID, EX, MEM e WB: o que cada estágio faz, o conteúdo de cada registrador de pipeline, a unidade de hazards com forwarding, stall e flush, a propagação das paradas e o custo em ciclos de cada evento. Inclui o diagrama de blocos exigido no aceite da M2.1. Esta seção reúne o que as seções 4, 6, 7, 8, 9, 10 e 11 já exigem do pipeline; onde ela e outra seção parecerem divergir, a outra prevalece e esta é corrigida. Decisão D14 em `docs/decisoes.md`, com as alternativas descartadas.
 
-A decidir:
+### 5.1 Diagrama de blocos
 
-- Estágio em que o desvio é resolvido (proposta: EX, com predição "não tomado") e quantas instruções são descartadas no flush.
-- Se há forwarding também para o estágio MEM (dado de store) ou só para EX.
-- Como os stalls de latência de memória (seção 10) se propagam pelo pipeline.
-- Formato do diagrama de blocos e onde fica (`docs/figuras/`).
+```mermaid
+flowchart LR
+    subgraph S_IF["IF: busca"]
+        PC["PC e PC seguinte"]
+        ALIGN["Alinhador<br/>buffer de 16 bits"]
+    end
+    R1[["IF/ID"]]
+    subgraph S_ID["ID: decodificação"]
+        EXP["Expansor C"]
+        DEC["Decodificador<br/>ilegal, ecall, ebreak, mret"]
+        RF["Banco de registradores<br/>32 x 32, 2 leituras, 1 escrita"]
+        IMM["Gerador de imediato"]
+    end
+    R2[["ID/EX"]]
+    subgraph S_EX["EX: execução"]
+        FWD["Seletores de forwarding"]
+        ALU["ALU, comparação e alvo de desvio"]
+        MUL["Multiplicador 33 x 33"]
+        DIV["Divisor multiciclo"]
+        XQNN["Unidade Xqnn<br/>mac, sat, relu, ACC"]
+        CSRU["CSRs e trap<br/>mcycle, minstret, mtvec, mepc"]
+    end
+    R3[["EX/MEM"]]
+    subgraph S_MEM["MEM: memória"]
+        LSU["LSU<br/>lanes, extensão, reserva lr/sc"]
+        AMOALU["ALU das amo"]
+    end
+    R4[["MEM/WB"]]
+    subgraph S_WB["WB: retire"]
+        WBU["Escrita em rd<br/>trace rvfi_*"]
+    end
+    HZ["Unidade de hazards<br/>stall e flush"]
+    IBUS(["ibus_*"])
+    DBUS(["dbus_*"])
+    RVFI(["rvfi_*"])
+
+    PC --> ALIGN --> R1 --> EXP --> DEC --> R2 --> FWD
+    DEC --> RF --> R2
+    DEC --> IMM --> R2
+    FWD --> ALU --> R3
+    FWD --> MUL --> R3
+    FWD --> DIV --> R3
+    FWD --> XQNN --> R3
+    FWD --> CSRU --> R3
+    R3 --> LSU --> R4 --> WBU
+    LSU --- AMOALU
+    ALIGN <--> IBUS
+    LSU <--> DBUS
+    WBU --> RVFI
+    WBU -. escrita de rd .-> RF
+    R3 -. forwarding, distância 1 .-> FWD
+    R4 -. forwarding, distância 2 .-> FWD
+    ALU -. desvio tomado, jal e jalr, novo PC e flush .-> PC
+    CSRU -. trap e mret, novo PC e flush .-> PC
+    R2 -. load-use .-> HZ
+    DIV -. ocupado .-> HZ
+    LSU -. ocupado .-> HZ
+    ALIGN -. sem instrução .-> HZ
+    HZ -. congela ou bolha .-> R1
+    HZ -. congela ou bolha .-> R2
+    HZ -. congela ou bolha .-> R3
+    HZ -. congela ou bolha .-> R4
+```
+
+Legenda: caixas de borda simples são blocos de lógica, com ou sem estado próprio; caixas de borda dupla são os registradores de pipeline; caixas arredondadas são as portas da seção 10 e o trace da seção 11. Setas cheias são o fluxo da instrução; setas tracejadas são forwarding, redirecionamento do PC e controle de stall e flush. O diagrama é desenhado pelo GitHub a partir do texto; para o documento do TCC ele é exportado para imagem na M5.2.
+
+### 5.2 Os estágios
+
+| Estágio | O que faz | Seções |
+|---|---|---|
+| IF | Mantém o PC. Busca pela porta `ibus_` a palavra alinhada do PC e a recebe no mesmo ciclo. Com a extensão C, aplica os quatro casos de alinhamento com o buffer de uma meia-palavra e entrega ao ID uma instrução de 16 ou 32 bits com a marca de tamanho. Calcula o PC seguinte em sequência, PC + 2 ou PC + 4. No redirecionamento, descarta o buffer e recomeça no alvo. Quando está congelado por uma parada mais adiante e uma busca em curso termina, guarda a palavra num registrador de espera e baixa `ibus_valid`; congelado, não emite busca nova. | 8, 10 |
+| ID | Expande a instrução comprimida. Decodifica: unidade que executa, operandos lidos (marcas "lê `rs1`" e "lê `rs2`"), `rd` e habilitação, acesso à memória e tamanho, CSR, desvio. Lê `rs1` e `rs2` no banco. Monta o imediato. Marca o que a seção 9 define como ilegal e as instruções `ecall`, `ebreak`, `mret`, `wfi` e `fence`. Detecta o load-use (5.4). | 8, 9 |
+| EX | Seletores de forwarding escolhem os operandos reais. ALU. Comparação e alvo de desvios, com predição estática de não tomado. Multiplicador de um ciclo. Divisor multiciclo, que para o pipeline. Unidade `Xqnn` com o `ACC` e multiplicador próprio. Unidade de CSRs: leitura e escrita em ordem de programa, `mcycle`, `minstret`, `macacc` e os de trap. Endereço de memória e checagem de alinhamento. Tomada do trap e `mret`. É o único ponto de redirecionamento do PC. | 4, 6, 9 |
+| MEM | Transação na porta `dbus_` com lanes e byte enables; extração do lane e extensão de sinal. `amo*.w` em duas transações com a ALU própria. Registrador de reserva e decisão do `sc.w`. Nunca gera exceção: o alinhamento foi checado no EX. | 7, 10 |
+| WB | Escreve `rd` no banco. Retire: expõe o trace `rvfi_*`, registrado neste estágio, e mantém `rvfi_order`. | 11 |
+
+Onde cada evento acontece, para não haver dúvida entre RTL, ISS e asserções:
+
+| Evento | Estágio |
+|---|---|
+| Leitura do banco de registradores | ID |
+| Escrita do banco de registradores | WB |
+| Leitura de CSR, inclusive `mcycle`, `minstret` e `macacc` | EX |
+| Escrita de CSR por `csrrw`, `csrrs`, `csrrc` e formas com imediato | EX |
+| Escritas do trap em `mepc`, `mcause`, `mtval` e `mstatus`; `mret` | EX |
+| Incremento de `minstret` | saída do EX, para instrução sem trap (seção 9.4) |
+| Incremento de `mcycle` | todo ciclo, independe do pipeline |
+| Leitura e escrita do `ACC` pela `mac` | EX |
+| Decisão de desvio, cálculo do alvo e redirecionamento | EX |
+| Checagem de alinhamento de dados e exceções 4 e 6 | EX |
+| Transação na `dbus_`; segunda transação da `amo*.w` | MEM |
+| Extração do lane e extensão de sinal do load | MEM |
+| Decisão do `sc.w` e atualização da reserva | MEM |
+| Retire e trace | WB |
+
+Banco de registradores: 32 registradores de 32 bits, `x0` fixo em zero, duas portas de leitura e uma de escrita, zerado no reset (seção 3), com leitura transparente à escrita (5.4).
+
+### 5.3 Registradores de pipeline
+
+Cada registrador tem um bit de validade. Além do que a execução precisa, eles carregam o que o trace (seção 11) e o trap (seção 9) exigem que chegue ao WB:
+
+| Registrador | Para a execução | Para o trace e o trap |
+|---|---|---|
+| IF/ID | PC, instrução crua de 16 ou 32 bits, marca de tamanho | |
+| ID/EX | PC, instrução expandida, sinais de controle, valores de `rs1` e `rs2` lidos do banco, endereços de `rs1`, `rs2` e `rd`, habilitação de `rd`, imediato, endereço de CSR | instrução crua, marca de tamanho, marcas de ilegal, `ecall`, `ebreak`, `mret` e o `mtval` candidato (bits da instrução) |
+| EX/MEM | PC, controle de memória (tipo, tamanho, sinal), endereço de memória, dado de store ou operando de `amo` já com forwarding, resultado (ALU, multiplicador, divisor, `Xqnn` ou leitura de CSR), endereço e habilitação de `rd` | instrução crua, tamanho, valores de `rs1` e `rs2` depois do forwarding, PC seguinte, marca de trap, escrita de CSR feita no EX (habilitação, endereço, valor) |
+| MEM/WB | PC, dado para `rd` (resultado ou dado lido já extraído), endereço e habilitação de `rd` | tudo o que o trace precisa: instrução crua, `rs1` e `rs2` com valores, PC seguinte, marca de trap, endereço, máscaras e dados de memória, escrita de CSR |
+
+Bolhas e cascas:
+
+- Bolha: registrador com validade zero. Não executa, não escreve nada, não retira, não aparece no trace e não fornece forwarding.
+- Casca de trap: a instrução que gerou exceção no EX não é descartada; segue para o MEM e o WB marcada como trap, com habilitação de `rd` em zero, sem transação de memória e sem escrita de CSR pela via normal. No WB ela retira com `rvfi_trap = 1` e `rvfi_pc_wdata` igual a `mtvec.BASE` (seção 11, regra 3). Não fornece forwarding. É o que garante um só ponto de retire, em ordem, também para traps.
+
+### 5.4 Hazards de dados: forwarding e load-use
+
+Quando uma instrução no EX lê um registrador que uma instrução anterior ainda não escreveu no banco, o valor vem de um registrador de pipeline:
+
+| Distância entre produtor e consumidor | Onde está o produtor quando o consumidor está no EX | De onde vem o valor |
+|---|---|---|
+| 1, instruções consecutivas | MEM | EX/MEM |
+| 2 | WB | MEM/WB |
+| 3 | escreveu o banco neste ciclo | o banco, transparente à escrita: uma leitura do registrador escrito no mesmo ciclo devolve o valor novo |
+| 4 ou mais | já escreveu | leitura normal do banco |
+
+Regras do forwarding:
+
+- Só para o EX. Não há caminho de forwarding para o MEM: o dado de store e o operando de `amo*.w` passam pelos seletores do EX e seguem em EX/MEM.
+- EX/MEM tem prioridade sobre MEM/WB quando os dois têm o mesmo `rd`.
+- `x0` nunca é fonte. Bolhas e cascas de trap, com habilitação de `rd` em zero, nunca são fonte.
+- Os seletores usam as marcas "lê `rs1`" e "lê `rs2`" do decodificador, as mesmas que zeram `rvfi_rs1_addr` e `rvfi_rs2_addr` no trace; `relu`, por exemplo, não lê `rs2` (seção 4.4).
+
+Load-use: as instruções cujo resultado só fica pronto na saída do MEM são os loads `lb`, `lh`, `lw`, `lbu`, `lhu`, mais `lr.w`, as nove `amo*.w`, cujo `rd` é o valor lido, e `sc.w`, cujo `rd` é 0 ou 1. Um consumidor logo em seguida, no EX, não tem de onde puxar o valor: ele espera um ciclo no ID, uma bolha entra no EX, e no ciclo seguinte o forwarding de distância 2 resolve. O divisor não entra nesta regra, porque para o EX até ter o resultado; `mul` e `mac` são de um ciclo. A condição, avaliada no ID olhando o EX:
+
+```
+stall_load_use = ex.valido e ex.resultado_sai_do_mem e ex.rd != 0
+                 e ( (id.le_rs1 e id.rs1 == ex.rd) ou (id.le_rs2 e id.rs2 == ex.rd) )
+```
+
+Vale também quando o consumidor é um store ou uma `amo*.w` que usa o registrador como dado: `lw x1` seguido de `sw x1` para um ciclo. A alternativa, um caminho de forwarding para o dado de store no MEM, foi descartada em D14.
+
+```
+ciclo            1    2    3    4    5    6
+add x1, x2, x3   IF   ID   EX   MEM  WB
+sub x4, x1, x5        IF   ID   EX   MEM  WB        x1 vem de EX/MEM no ciclo 4, sem parada
+
+ciclo            1    2    3    4    5    6    7
+lw  x1, 0(x2)    IF   ID   EX   MEM  WB
+add x3, x1, x4        IF   ID   ID   EX   MEM  WB   load-use: a add espera no ID no ciclo 4,
+                                                    o EX recebe bolha, e x1 vem de MEM/WB no ciclo 5
+```
+
+### 5.5 Hazards de controle: flush
+
+- Predição estática de não tomado: o IF busca sempre a instrução seguinte em sequência.
+- Toda mudança de fluxo é resolvida no EX, no ciclo em que a instrução avança: desvio condicional tomado, `jal`, `jalr`, `mret` e trap. O EX redireciona o PC e invalida IF/ID e ID/EX: duas instruções descartadas, as que estavam no IF e no ID. O buffer de busca é esvaziado (seção 8.2).
+- As instruções descartadas nunca chegam ao EX, e todo efeito, em `rd`, em CSR, na memória e o próprio trap, só acontece do EX em diante: elas somem sem rastro. Uma instrução ilegal na sequência errada, marcada pelo ID, é descartada e não gera trap.
+- O redirecionamento tem prioridade sobre um stall de load-use em curso: a instrução parada no ID é da sequência errada e vai embora no flush.
+- Custo: dois ciclos por mudança de fluxo, mais um se o alvo é `4k + 2` e começa uma instrução de 32 bits (seção 8.2).
+
+```
+ciclo            1    2    3    4    5    6    7
+beq (tomado)     IF   ID   EX   MEM  WB
+seguinte              IF   ID   --                  descartada no flush do ciclo 3
+seguinte + 1               IF   --                  descartada
+alvo                            IF   ID   EX   MEM  WB
+```
+
+### 5.6 Hazards estruturais e propagação das paradas
+
+Há dois recursos que uma instrução pode ocupar por mais de um ciclo: a porta de dados, que uma `amo*.w` usa em duas transações, e o divisor. Multiplicador e `Xqnn` têm cada um o seu, e o banco tem portas suficientes. Fora isso, as paradas vêm das memórias e do load-use. A regra de propagação é uma só: o estágio que causou a parada e todos os anteriores congelam; o estágio logo depois dele recebe uma bolha; os seguintes continuam. Se duas causas ocorrem ao mesmo tempo, a mais adiantada no pipeline manda, porque congela as demais de qualquer modo.
+
+| Causa | Quem congela | Quem recebe bolha | Quem segue |
+|---|---|---|---|
+| IF sem instrução completa: wait state da `ibus_` ou a dupla busca do caso 4 da seção 8.2 | IF | ID | EX, MEM, WB |
+| Load-use detectado no ID | IF, ID | EX | MEM, WB |
+| EX ocupado: divisão em curso | IF, ID, EX | MEM | WB |
+| MEM ocupado: wait state da `dbus_` ou segunda transação de uma `amo*.w` | IF, ID, EX, MEM | WB | WB termina o que tinha e depois fica vazio |
+
+Em sinais, com `stall_mem` igual a transação da `dbus_` pendente ou segunda transação de `amo*.w` pendente, `stall_ex` igual a `stall_mem` ou divisor ocupado, e `stall_id` igual a `stall_ex` ou `stall_load_use`, o que cada registrador faz a cada ciclo:
+
+| Registrador | Congela | Recebe bolha | Carrega a instrução | Invalidado por flush |
+|---|---|---|---|---|
+| MEM/WB | nunca | `stall_mem` | MEM completou | não |
+| EX/MEM | `stall_mem` | `stall_ex` sem `stall_mem` | EX completou e MEM livre | não |
+| ID/EX | `stall_ex` | `stall_load_use` sem `stall_ex` | ID completou e EX livre | sim |
+| IF/ID | `stall_id` | IF sem instrução completa, sem `stall_id` | IF entregou e ID livre | sim |
+| PC | `stall_id`, salvo redirecionamento | | IF entregou e ID livre | recebe o alvo |
+
+Consequências já fixadas nas outras seções: o IF congelado guarda a palavra recebida e baixa `ibus_valid` (seção 10, regra 5); o EX só redireciona o PC no ciclo em que avança, então um desvio com o MEM parado espera (seções 6.2, 7.3 e 9.3); a divisão e a sequência das `amo*.w` não são interrompíveis.
+
+### 5.7 Custo em ciclos
+
+Com zero wait states, o núcleo retira uma instrução por ciclo, menos nos eventos abaixo. É a tabela que a M4.4 usa para explicar as medições de `mcycle`:
+
+| Evento | Ciclos a mais |
+|---|---|
+| Desvio condicional tomado, `jal`, `jalr`, `mret`, trap | 2 |
+| Alvo em `4k + 2` que começa instrução de 32 bits | mais 1 |
+| Load-use, inclusive `lr.w`, `sc.w`, `amo*.w` como produtor e store ou `amo*.w` como consumidor | 1 |
+| `amo*.w` | 1 |
+| Divisão | latência fixa da seção 6.2 menos 1 |
+| Wait state em qualquer porta | 1 por ciclo de espera, por acesso |
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 6. Extensão M
 
@@ -782,3 +982,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.10 | 2026-11-16 | Lucas Lares | Seção 6: multiplicação em um ciclo com um multiplicador de 33 × 33 para as quatro instruções, divisão com restauração de latência constante e stall, casos especiais da ISA, multiplicador próprio da `mac` (D11). Ajustes decorrentes em 4.2, 4.5 e 12.3. Seção 6 sem pendências. |
 | 0.11 | 2026-11-16 | Lucas Lares | Seção 7: codificação das onze instruções da extensão A, reserva de uma palavra invalidada só por `sc.w`, `amo*.w` em duas transações no MEM com ALU própria, `aq` e `rl` ignorados (D12). `lr.w` com `rs2` não nulo e codificações fora da tabela acrescentados aos ilegais da 9.2. Seção 7 sem pendências. |
 | 0.12 | 2026-11-16 | Lucas Lares | Seção 8: tabela das 26 instruções RV32C com equivalentes, imediatos, reservados e HINTs; busca com buffer de uma meia-palavra e os quatro casos de alinhamento; expansão em ID e avanço do PC pelo tamanho real; `EN_C = 0`; verificação (D13). Seção 8 sem pendências. |
+| 0.13 | 2026-11-16 | Lucas Lares | Seção 5: diagrama de blocos em Mermaid, estágios e tabela de onde cada evento acontece, registradores de pipeline com bolhas e cascas de trap, forwarding e load-use, flush, propagação das paradas em tabela de sinais e custo em ciclos (D14). Frase do `ACC` em 4.2 ajustada. Todas as treze seções sem pendências: documento pronto para a revisão da versão 1.0. |
