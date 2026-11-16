@@ -38,7 +38,7 @@ Riscos mapeados no plano de trabalho (seção 7.4). A coluna "Situação" é atu
 | R5 | Curva de aprendizado de UVM e SystemVerilog | Atraso em M3.1–M3.3 | Iniciar o ambiente com smoke test simples na semana 2; estudo dirigido com material da Accellera/Cadence; pareamento entre integrantes. | Aberto |
 | R6 | Dificuldades na construção da toolchain | Atraso em M4.1 | Utilizar binários pré-compilados; documentar versões; testar o fluxo com programa mínimo antes dos riscv-tests. | Aberto |
 | R7 | Compilador reordenar, duplicar ou eliminar instruções asm inline | Resultados incorretos na aplicação | `asm volatile` na `mac` e nos acessos ao acumulador, para manter a ordem e impedir eliminação; restrições de operandos corretas (`"=r"`, `"r"`); testes unitários dos intrínsecos; inspeção do código gerado com objdump. | Aberto |
-| R8 | Definição tardia da semântica das instruções (MAC com leitura de `rd`, largura de SAT) | Retrabalho em RTL, modelo e software | Fechar a especificação (M2.1) até a semana 4 com aprovação do orientador; tratar mudanças posteriores pela seção 7.1 do plano (seção 3 deste registro). | Aberto. Acumulador da MAC decidido em 2026-10-07 (D3); semântica de SAT e RELU decidida em 2026-11-16 (D7). Falta a aprovação da versão 1.0. |
+| R8 | Definição tardia da semântica das instruções (MAC com leitura de `rd`, largura de SAT) | Retrabalho em RTL, modelo e software | Fechar a especificação (M2.1) até a semana 4 com aprovação do orientador; tratar mudanças posteriores pela seção 7.1 do plano (seção 3 deste registro). | Fechado em 2026-11-16: especificação 1.0 aprovada e etiquetada `spec-v1.0`. A semântica ficou fixada por D3 e D7; mudanças posteriores seguem a seção 3 deste registro. |
 
 ## 3. Mudanças de escopo
 

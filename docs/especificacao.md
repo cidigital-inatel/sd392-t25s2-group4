@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.14, não aprovada.
+Última atualização: 2026-11-16. Situação: versão 1.0, aprovada em 2026-11-16 pelos três integrantes e pelo orientador; tag `spec-v1.0`. Mudanças a partir daqui seguem a seção 7.1 do plano de trabalho e a seção 3 de `docs/decisoes.md`.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -70,7 +70,7 @@ Se for preciso cortar, a ordem de prioridade é a da seção 7.3 do plano de tra
 
 Todo corte é uma mudança de escopo: issue, linha na seção 3 de `docs/decisoes.md` e aprovação do orientador (plano, seção 7.1). A extensão C já tem o ponto de decisão marcado para a revisão de riscos da semana 11 (risco R2).
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 2. Mapa de memória e periféricos
 
@@ -114,7 +114,7 @@ O protocolo do `tohost` é o dos `riscv-tests` e do Spike: `RVTEST_PASS` escreve
 
 Não há espelhos dos contadores nos periféricos: o software lê `mcycle` e `minstret` com `csrr` (seção 9), como a HAL da M4.1 já prevê. Decisão D4 em `docs/decisoes.md`.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 3. Reset e término
 
@@ -148,7 +148,7 @@ Um programa termina escrevendo no `tohost` (`0x2000_0004`, seção 2) um valor c
 - O testbench e o ISS encerram no retire da instrução de store que escreveu no `tohost`. Esse retire aparece no trace com `rvfi_mem_addr = 0x2000_0004` e `rvfi_mem_wmask` incluindo o byte 0 (seção 11), é comparado normalmente e é o último comparado. Como os dois param na mesma instrução, não há "depois" para divergir.
 - Nenhuma outra coisa encerra a simulação. `ebreak`, `ecall` e instrução ilegal geram trap (seção 9), e é o tratador que decide, normalmente escrevendo no `tohost` com código de falha. Um limite de ciclos do testbench, para programa que travou, é falha do teste, não término.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 4. Instruções `Xqnn`
 
@@ -276,7 +276,7 @@ sb   t0, 0(a1)
 
 Sem desvios condicionais no caminho. Em RV32IMAC puro, saturação e ReLU custam de quatro a oito instruções com desvios; medir esse ganho é a M4.4. A ordem `sat` depois `relu` ou `relu` depois `sat` dá o mesmo resultado, porque os dois intervalos contêm o zero. O arredondamento do deslocamento (truncar ou somar meio antes do `sra`) é escolha da M4.3 e tem de ser a mesma na referência NumPy e no C das duas versões da aplicação.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 5. Pipeline
 
@@ -488,7 +488,7 @@ Com zero wait states, o núcleo retira uma instrução por ciclo, menos nos even
 | Divisão | latência constante da seção 6.2 menos 1 |
 | Wait state em qualquer porta | 1 por ciclo de espera, por acesso |
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 6. Extensão M
 
@@ -539,7 +539,7 @@ A unidade `Xqnn` tem o próprio multiplicador, de 32 × 32 bits para 32 bits, s�
 - Um defeito no multiplicador de uma unidade não mascara a outra. Como `mac` com `ACC = 0` e `mul` devem dar os mesmos 32 bits baixos (seção 4.2), comparar as duas é um teste barato que localiza qual multiplicador errou.
 - Compartilhar o multiplicador é a otimização óbvia para uma versão sintetizada e fica anotada em D11.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 7. Extensão A
 
@@ -587,7 +587,7 @@ A reserva é um registrador dentro da lógica de memória do núcleo: um bit de 
 
 `aq`, de acquire, e `rl`, de release, pedem que acessos posteriores à atômica não passem à frente dela e que acessos anteriores não fiquem para depois. O núcleo executa todos os acessos em ordem de programa e cada escrita vale no ciclo seguinte (seção 10, regra 7), sem cache nem buffer de escrita: as duas garantias já valem sempre. Os bits são ignorados: as quatro combinações decodificam para a mesma operação, sem exceção. Continuam visíveis em `rvfi_insn`.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 8. Extensão C
 
@@ -667,7 +667,7 @@ Com `EN_C = 0` (seção 12): o buffer de busca e o expansor são removidos, cada
 
 A suíte `rv32uc` (M2.3), programas em C compilados com `-march=rv32imac_zicsr` executados até o fim, e, na M3.3, covergroups para instruções comprimidas, instruções de 32 bits que cruzam a fronteira, redirecionamento para alvo `4k + 2` com os casos 3 e 4, e cada codificação reservada da tabela gerando a exceção. O gerador de instruções aleatórias produz misturas de 16 e 32 bits com desvios para alvos `4k + 2`. O buffer de busca é a parte que o risco R2 aponta; é nela que a cobertura precisa ser mais fina.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 9. CSRs e traps
 
@@ -754,7 +754,7 @@ PC           <- mtvec.BASE          bits 1:0 em zero
 
 A simulação só termina pelo `tohost` (seção 2). Nenhuma exceção encerra a simulação por si; quem decide é o tratador.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 10. Interface de memória
 
@@ -860,7 +860,7 @@ Acessos desalinhados: `lw`, `sw` e as instruções da extensão A com `dbus_addr
 
 Os escravos de `soc_top`, itens da pessoa C na M2.2, obedecem a este protocolo com o comportamento padrão de zero wait states, `ready = 1` sempre, e leitura combinacional. `imem` e `dmem` têm um parâmetro de wait states, com padrão 0 e nome fixado na seção 12, que faz o `ready` subir só depois de N ciclos em cada acesso, para a simulação local com Verilator ou Icarus exercitar os stalls sem depender do agente UVM. `periph` não tem wait states. Os tamanhos e o decodificador de regiões são os da seção 2.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 11. Interface de trace de retire
 
@@ -922,7 +922,7 @@ A cada retire, o scoreboard compara `rvfi_insn`, `rvfi_pc_rdata`, `rvfi_pc_wdata
 
 Uma exceção: o valor lido de `mcycle` e `mcycleh` não é verificável por um modelo com precisão de instrução, que não sabe quantos ciclos o pipeline gastou. Antes de o ISS executar uma leitura desses contadores, o testbench entrega a ele o valor que o RTL leu, e o ISS usa esse valor; assim RTL e ISS seguem iguais em `rvfi_rd_wdata` e em tudo o que o programa fizer com esse valor depois, inclusive gravá-lo na memória. A forma de entregar o valor é da interface DPI-C da M3.2. Executando sozinho, sem RTL, o ISS define `mcycle` por uma regra própria e determinística, documentada em `model/README.md`. `minstret` não precisa disso: o ISS conta instruções com exatidão.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 12. Parâmetros do topo
 
@@ -968,7 +968,7 @@ As memórias não carregam arquivo nenhum sozinhas e não leem a linha de comand
 - ISS: tudo que muda o comportamento visível ao programa, `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE` e `DMEM_SIZE`, é configurável no ISS com o mesmo significado e os mesmos padrões; a sintaxe da linha de comando é da M3.2. Wait states não entram, porque não mudam o comportamento arquitetural.
 - Nomenclatura: parâmetros em maiúsculas com sublinhado; sinais, módulos e instâncias em minúsculas com sublinhado, como nas seções 10 e 11.
 
-A decidir: nada. Seção pronta para revisão.
+A decidir: nada.
 
 ## 13. Histórico de versões
 
@@ -989,3 +989,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.12 | 2026-11-16 | Lucas Lares | Seção 8: tabela das 26 instruções RV32C com equivalentes, imediatos, reservados e HINTs; busca com buffer de uma meia-palavra e os quatro casos de alinhamento; expansão em ID e avanço do PC pelo tamanho real; `EN_C = 0`; verificação (D13). Seção 8 sem pendências. |
 | 0.13 | 2026-11-16 | Lucas Lares | Seção 5: diagrama de blocos em Mermaid, estágios e tabela de onde cada evento acontece, registradores de pipeline com bolhas e cascas de trap, forwarding e load-use, flush, propagação das paradas em tabela de sinais e custo em ciclos (D14). Frase do `ACC` em 4.2 ajustada. Todas as treze seções sem pendências: documento pronto para a revisão da versão 1.0. |
 | 0.14 | 2026-11-16 | Lucas Lares | Revisão de coerência do documento inteiro, sem decisão nova: reset do `mstatus` em `0x1800`; escrita nos CSRs só de leitura; fontes no trace em instruções sem efeito e com trap; `minstret` e `rvfi_valid` em relação a stalls; `macacc` condicionado a `EN_XQNN`; registrador de espera do IF na 3.1, na 8.2 e no diagrama; `mret` e a porta de CSR; `rvfi_csr_wdata` e leitura de `mcycle` em contadores; `EN_C = 0` em `mtval`; `mtvec` zero; restrições de `RESET_VECTOR` por módulo; instância `u_soc`; tabelas da 5.3, 5.4 e 5.6; seta da unidade de hazards ao PC; periféricos; `riscv-tests`; orçamento da DMEM; linha da D4 no histórico. Latência do divisor fixada na 6.2 quando o RTL existir; regra de escrita em `minstret` fechada pela ISA e pelo Spike; nome `Xqnn` unificado no corpo do texto. |
+| 1.0 | 2026-11-16 | Lucas Lares | Versão aprovada pelos três integrantes e pelo orientador, com o conteúdo da 0.14 sem alteração; roteiro da reunião em `docs/roteiro-revisao-especificacao.md`. Tag `spec-v1.0` na `main`. |
