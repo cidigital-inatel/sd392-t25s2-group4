@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.5, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.6, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -96,7 +96,7 @@ Regras comuns às três:
 
 - Os mnemônicos existem nesta especificação, no trace do ISS e na documentação. O assembler GNU não os conhece; o software emite as instruções com a diretiva `.insn r` (M4.2) e o `objdump` as mostra como palavras cruas, decodificadas pelo script da M4.2.
 - `rd = x0`: a escrita em `rd` é descartada, como em qualquer R-type. Para `sat` e `relu` a instrução não tem efeito arquitetural; para `mac` o acumulador é atualizado mesmo assim (4.2). Em todos os casos a instrução é retirada e contada em `minstret`.
-- `funct3` de `011` a `111` e qualquer `funct7` diferente de zero são reservados. Tratamento em "A decidir".
+- `funct3` de `011` a `111` e qualquer `funct7` diferente de zero são reservados. Uma instrução com opcode `custom-0` e campos reservados é instrução ilegal e gera a exceção correspondente (seção 9), nunca `nop`: um `.insn` digitado errado no software falha na hora, em vez de passar em silêncio, e o espaço de codificação fica livre para extensões futuras, porque nenhum programa pode depender de um `nop`. Decisão D7 em `docs/decisoes.md`.
 
 ### 4.2 `mac`: multiplicação e acumulação
 
@@ -127,17 +127,82 @@ Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acess
 
 ### 4.3 `sat`: saturação
 
-A definir no próximo passo. Proposta do plano: `rd ← clamp(rs1, −2^(n−1), 2^(n−1)−1)`, com `n = rs2[4:0]`, comparação com sinal.
+Força `rs1` a caber em `n` bits com sinal, com `n = rs2[4:0]`. Decisão D7 em `docs/decisoes.md`.
+
+```
+n ← rs2[4:0]
+se n = 0:   rd ← rs1                                    sem saturação: n vale como 32
+senão:      rd ← clamp(rs1, −2^(n−1), 2^(n−1) − 1)      comparação com sinal
+```
+
+- `rs1` é tratado como inteiro de 32 bits com sinal. Para `n = 8`, o resultado fica entre −128 e 127; para `n = 16`, entre −32768 e 32767; para `n = 1`, entre −1 e 0; para `n = 31`, entre −2^30 e 2^30 − 1.
+- A largura vem de um registrador, e não de um imediato, para as três instruções terem o mesmo formato R-type e para `n` poder variar em tempo de execução, lido de uma tabela por camada, sem recompilar. O `li` que carrega `n` fica fora do laço e executa uma vez por camada; ler `rs2` não custa nada, porque o R-type já lê dois fontes.
+- `n = 0` é identidade: equivale a `n = 32`, e nenhum valor de 32 bits é cortado. Dá um modo "sem saturação" selecionável em tempo de execução, e em hardware sai de graça, porque os limites viram os do próprio int32.
+- `rs2[31:5]` é ignorado, como as instruções de deslocamento da ISA ignoram os bits altos de `rs2`. Esses bits não são reservados: um valor diferente de zero neles não gera exceção.
+- `rd = x0`: sem efeito (4.1). A `sat` não lê `rd`; `rs1` e `rs2` são os dois fontes informados no trace (seção 11).
+- Implementação no RTL: `rs1` cabe em `n` bits com sinal exatamente quando os bits `rs1[31:n−1]` são todos iguais ao bit de sinal `rs1[31]`. Se cabem, `rd = rs1`; se não, `rs1[31]` escolhe o limite: 1 leva a `−2^(n−1)`, 0 leva a `2^(n−1) − 1`. Um ciclo, sem comparador de 32 bits. O ISS implementa pela comparação direta com os dois limites, de propósito, para as duas implementações não compartilharem o mesmo raciocínio (risco R3).
+- Referência em C (M4.2 e implementação independente), sem comportamento indefinido:
+
+```c
+static inline int32_t sat_ref(int32_t x, uint32_t n) {
+    n &= 31u;
+    if (n == 0u) return x;
+    int32_t hi = (int32_t)((1u << (n - 1u)) - 1u);
+    int32_t lo = -hi - 1;
+    return x > hi ? hi : (x < lo ? lo : x);
+}
+```
+
+Exemplos:
+
+| `n` | `rs1` | `rd` |
+|---|---|---|
+| 8 | 100 | 100 |
+| 8 | 200 | 127 |
+| 8 | −200 | −128 |
+| 8 | `0x7FFF_FFFF` | 127 |
+| 8 | `0x8000_0000` | −128 |
+| 16 | 40000 | 32767 |
+| 16 | −40000 | −32768 |
+| 1 | 5 | 0 |
+| 1 | −5 | −1 |
+| 0 | `0x8000_0000` | `0x8000_0000` |
+
+Saturação sem sinal. Não há variante sem sinal: para forçar um valor ao intervalo `[0, 2^k − 1]`, usa-se `sat` com `n = k + 1` seguida de `relu`. Com `k = 8`, a `sat` com `n = 9` dá `[−256, 255]` e a `relu` dá `[0, 255]`.
 
 ### 4.4 `relu`: ativação
 
-A definir no próximo passo. Proposta do plano: `rd ← 0` se `rs1 < 0` com sinal, senão `rd ← rs1`; `rs2 = x0`.
+Zera os valores negativos. Decisão D7.
+
+```
+rd ← 0      se rs1[31] = 1, isto é, rs1 negativo com sinal
+rd ← rs1    caso contrário
+```
+
+- Só lê `rs1`. O campo `rs2` da codificação é ignorado: o software emite `x0` nele (`.insn r 0x0B, 0x2, 0x00, rd, rs1, x0`), mas qualquer valor produz o mesmo resultado e não gera exceção. Como a instrução não lê `rs2`, o trace informa `rvfi_rs2_addr = 0` e `rvfi_rs2_rdata = 0` (seção 11), seja o que estiver no campo.
+- `rd = x0`: sem efeito (4.1).
+- Implementação no RTL: cada bit de `rd` é `rs1[i] AND NOT rs1[31]`. Um ciclo, sem comparador.
+- Referência em C: `static inline int32_t relu_ref(int32_t x) { return x < 0 ? 0 : x; }`
+- Exemplos: `relu` de −1 é 0; de `0x8000_0000` é 0; de 0 é 0; de 1 é 1; de `0x7FFF_FFFF` é `0x7FFF_FFFF`.
+
+### 4.5 Efeitos no pipeline e uso conjunto
+
+`sat` e `relu` executam no estágio EX em um ciclo, como uma operação da ALU, e escrevem `rd` pelo caminho normal de WB. Participam do forwarding como qualquer R-type. `mac`, `sat` e `relu` em sequência, cada uma consumindo o resultado da anterior, encadeiam sem stall quando a `mac` é de um ciclo; com a `mac` de dois ciclos (seção 6), a `sat` logo após ela sofre o stall de load-use descrito em 4.2.
+
+Requantização de uma saída de camada int8, com o acumulado em `t0`, o deslocamento em `t1` e `t2 = 8`:
+
+```
+sra  t0, t0, t1      # escala em potência de dois
+sat  t0, t0, t2      # [-128, 127]
+relu t0, t0          # [0, 127]
+sb   t0, 0(a1)
+```
+
+Sem desvios condicionais no caminho. Em RV32IMAC puro, saturação e ReLU custam de quatro a oito instruções com desvios; medir esse ganho é a M4.4. A ordem `sat` depois `relu` ou `relu` depois `sat` dá o mesmo resultado, porque os dois intervalos contêm o zero. O arredondamento do deslocamento (truncar ou somar meio antes do `sra`) é escolha da M4.3 e tem de ser a mesma na referência NumPy e no C das duas versões da aplicação.
 
 A decidir:
 
-- `sat`: largura em registrador (`rs2[4:0]`, como o plano propõe) ou em imediato; comportamento com `n = 0`, `n = 1` e `rs2[31:5]` diferente de zero.
-- `relu`: comportamento quando `rs2` não é `x0`: ignorar o campo ou tratar como reservada.
-- `funct3` e `funct7` reservados: instrução ilegal ou `nop`. Depende do tratamento de instrução ilegal na seção 9.
+- Fechar com a seção 9 a exceção de instrução ilegal gerada pelas codificações reservadas do `custom-0`: código de causa e o que é salvo.
 
 ## 5. Pipeline
 
@@ -380,3 +445,4 @@ A decidir:
 | 0.3 | 2026-10-07 | Lucas Lares | Seção 4: codificação das três instruções e semântica da `mac`, com acumulador dedicado exposto como CSR `0x7C0`. |
 | 0.4 | 2026-11-16 | Lucas Lares | Seção 10: interface de memória com as portas `ibus_` e `dbus_`, protocolo `valid`/`ready` de uma fase com resposta no mesmo ciclo, byte enables alinhados por lane (D5). Seção 8 registra a remontagem das instruções que cruzam a palavra no IF. |
 | 0.5 | 2026-11-16 | Lucas Lares | Seção 11: trace de retire no padrão RVFI, com valores das fontes depois do forwarding, porta genérica de escrita de CSR, instrução comprimida crua e regra de sincronização do `mcycle` com o ISS (D6). |
+| 0.6 | 2026-11-16 | Lucas Lares | Seções 4.3 e 4.4: semântica de `sat` (largura em `rs2[4:0]`, `n = 0` identidade, `rs2[31:5]` ignorado) e de `relu` (não lê `rs2`); codificações reservadas do `custom-0` como instrução ilegal; nova 4.5 com efeitos no pipeline e a sequência de requantização (D7). |
