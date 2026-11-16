@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.11, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.12, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -389,15 +389,83 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 8. Extensão C
 
-Instruções comprimidas de 16 bits: alinhamento do PC a 2 bytes, busca de instruções de 32 bits que cruzam a fronteira de palavra, expansão das comprimidas em ID, cálculo de PC + 2, e a habilitação por parâmetro. É a última extensão a ser implementada e a primeira candidata a corte (risco R2 em `docs/decisoes.md`).
+Define as instruções comprimidas de 16 bits: a tabela de equivalência com as instruções de 32 bits, como o IF busca instruções alinhadas a 2 bytes e remonta as de 32 bits que cruzam a fronteira de palavra, como o ID expande cada comprimida, como o PC avança, o que muda com `EN_C = 0` e como a extensão é verificada. É a última extensão a ser implementada e a primeira candidata a corte (risco R2 em `docs/decisoes.md`; ordem de corte na seção 1.5). Decisão D13 em `docs/decisoes.md`, com as alternativas descartadas.
 
-Já fixado pela seção 10 (D5): a porta de instruções é sempre de palavra inteira, e a remontagem de uma instrução de 32 bits que cruza a fronteira de palavra é feita no IF, com um buffer, a partir de duas leituras consecutivas. A memória e o agente UVM não sabem que a extensão C existe.
+### 8.1 Instruções
 
-Já fixado pela seção 9 (D8): com o parâmetro de C desligado, toda instrução de 16 bits é instrução ilegal (código 2), e um desvio tomado ou salto para endereço que não é múltiplo de 4 gera a exceção de endereço de instrução desalinhado (código 0), com `mtval` igual ao alvo.
+Uma instrução é de 16 bits quando seus bits `[1:0]`, o quadrante, são diferentes de `11`. O quadrante, o `funct3` nos bits `[15:13]` e alguns bits de desempate identificam a instrução. Cada comprimida equivale exatamente a uma instrução de 32 bits de RV32I; a tabela dá a equivalência, a montagem do imediato, as codificações reservadas e as HINT. `rd'`, `rs1'` e `rs2'` são campos de 3 bits que endereçam `x8` a `x15`; `rd`, `rs1` e `rs2` são campos de 5 bits. Na coluna do imediato, `[a:b]→[c:d]` quer dizer que os bits `a:b` da instrução de 16 bits vão para os bits `c:d` do imediato; bits não citados são zero, e os imediatos com sinal estendem o bit mais alto citado. Em caso de divergência entre esta tabela e a ISA, vale a ISA e a tabela é corrigida.
 
-A decidir:
+| Quadrante, `funct3`, desempate | Instrução | Equivalente de 32 bits | Imediato | Reservado e HINT |
+|---|---|---|---|---|
+| `00`, `000` | `c.addi4spn rd', nzuimm` | `addi rd', x2, nzuimm` | `[12:11]→[5:4]`, `[10:7]→[9:6]`, `[6]→[2]`, `[5]→[3]`, sem sinal | `nzuimm = 0` reservado, o que inclui a palavra de 16 bits toda em zero |
+| `00`, `010` | `c.lw rd', uimm(rs1')` | `lw rd', uimm(rs1')` | `[12:10]→[5:3]`, `[6]→[2]`, `[5]→[6]`, sem sinal | |
+| `00`, `110` | `c.sw rs2', uimm(rs1')` | `sw rs2', uimm(rs1')` | como `c.lw` | |
+| `00`, `001`, `011`, `101`, `111` | `c.fld`, `c.flw`, `c.fsd`, `c.fsw` | | | ilegal: ponto flutuante fora do escopo |
+| `00`, `100` | | | | reservado pela ISA: ilegal |
+| `01`, `000` | `c.nop`; `c.addi rd, nzimm` | `addi rd, rd, nzimm` | `[12]→[5]`, `[6:2]→[4:0]`, com sinal | `rd = 0` com `nzimm = 0` é `c.nop`; `rd = 0` com `nzimm ≠ 0`, e `rd ≠ 0` com `nzimm = 0`, são HINT |
+| `01`, `001` | `c.jal offset` | `jal x1, offset` | `[12]→[11]`, `[11]→[4]`, `[10:9]→[9:8]`, `[8]→[10]`, `[7]→[6]`, `[6]→[7]`, `[5:3]→[3:1]`, `[2]→[5]`, com sinal | só em RV32; o retorno gravado em `x1` é PC + 2 |
+| `01`, `010` | `c.li rd, imm` | `addi rd, x0, imm` | como `c.addi` | `rd = 0` HINT |
+| `01`, `011`, `rd = 2` | `c.addi16sp nzimm` | `addi x2, x2, nzimm` | `[12]→[9]`, `[6]→[4]`, `[5]→[6]`, `[4:3]→[8:7]`, `[2]→[5]`, com sinal | `nzimm = 0` reservado |
+| `01`, `011`, `rd ≠ 2` | `c.lui rd, nzimm` | `lui rd, nzimm` | `[12]→[17]`, `[6:2]→[16:12]`, com sinal | `nzimm = 0` reservado; `rd = 0` HINT |
+| `01`, `100`, `[11:10] = 00` | `c.srli rd', shamt` | `srli rd', rd', shamt` | `[12]→[5]`, `[6:2]→[4:0]` | `shamt[5] = 1` reservado em RV32; `shamt = 0` HINT |
+| `01`, `100`, `[11:10] = 01` | `c.srai rd', shamt` | `srai rd', rd', shamt` | como `c.srli` | como `c.srli` |
+| `01`, `100`, `[11:10] = 10` | `c.andi rd', imm` | `andi rd', rd', imm` | como `c.addi` | |
+| `01`, `100`, `[12:10] = 011`, `[6:5] = 00`, `01`, `10`, `11` | `c.sub`, `c.xor`, `c.or`, `c.and rd', rs2'` | `sub`, `xor`, `or`, `and rd', rd', rs2'` | | |
+| `01`, `100`, `[12:10] = 111` | `c.subw`, `c.addw` e reservados | | | ilegal em RV32 |
+| `01`, `101` | `c.j offset` | `jal x0, offset` | como `c.jal` | |
+| `01`, `110` | `c.beqz rs1', offset` | `beq rs1', x0, offset` | `[12]→[8]`, `[11:10]→[4:3]`, `[6:5]→[7:6]`, `[4:3]→[2:1]`, `[2]→[5]`, com sinal | |
+| `01`, `111` | `c.bnez rs1', offset` | `bne rs1', x0, offset` | como `c.beqz` | |
+| `10`, `000` | `c.slli rd, shamt` | `slli rd, rd, shamt` | como `c.srli` | `shamt[5] = 1` reservado em RV32; `rd = 0` e `shamt = 0` HINT |
+| `10`, `010` | `c.lwsp rd, uimm` | `lw rd, uimm(x2)` | `[12]→[5]`, `[6:4]→[4:2]`, `[3:2]→[7:6]`, sem sinal | `rd = 0` reservado |
+| `10`, `100`, `[12] = 0`, `rs2 = 0` | `c.jr rs1` | `jalr x0, 0(rs1)` | | `rs1 = 0` reservado |
+| `10`, `100`, `[12] = 0`, `rs2 ≠ 0` | `c.mv rd, rs2` | `add rd, x0, rs2` | | `rd = 0` HINT |
+| `10`, `100`, `[12] = 1`, `rs1 = 0`, `rs2 = 0` | `c.ebreak` | `ebreak` | | exceção código 3, `mtval` = PC (seção 9.2) |
+| `10`, `100`, `[12] = 1`, `rs1 ≠ 0`, `rs2 = 0` | `c.jalr rs1` | `jalr x1, 0(rs1)` | | o retorno gravado em `x1` é PC + 2 |
+| `10`, `100`, `[12] = 1`, `rs2 ≠ 0` | `c.add rd, rs2` | `add rd, rd, rs2` | | `rd = 0` HINT |
+| `10`, `110` | `c.swsp rs2, uimm` | `sw rs2, uimm(x2)` | `[12:9]→[5:2]`, `[8:7]→[7:6]`, sem sinal | |
+| `10`, `001`, `011`, `101`, `111` | `c.fldsp`, `c.flwsp`, `c.fsdsp`, `c.fswsp` | | | ilegal: ponto flutuante fora do escopo |
 
-- Redação completa da seção: buffer de remontagem no IF, expansor em ID, cálculo de PC + 2 e os casos de borda da busca que cruza a palavra.
+São 26 instruções implementadas. Regras:
+
+- Codificação reservada, ou de ponto flutuante, é instrução ilegal: exceção de código 2 com `mtval` igual aos 16 bits, com `[31:16] = 0` (seção 9.2).
+- HINT expande literalmente. O resultado é uma instrução com destino `x0` ou deslocamento zero, que não tem efeito arquitetural; ela retira, conta em `minstret` e aparece no trace como qualquer outra.
+- No trace, `rvfi_insn` traz os 16 bits crus, com `[31:16] = 0`, e os campos de registradores trazem os valores já expandidos (seção 11).
+
+### 8.2 Busca com alinhamento de 16 bits
+
+A porta de instruções é sempre de palavra inteira (seção 10): o IF busca a palavra alinhada do PC, `ibus_addr = PC` com o bit 1 zerado, e as seguintes em ordem crescente. Com a extensão C, o PC pode ser `4k + 2`, e uma instrução de 32 bits pode começar na metade alta de uma palavra e terminar na metade baixa da seguinte. Chamando de A a palavra em `4k`, com metades `A_lo` em `4k` e `A_hi` em `4k + 2`, e de B a palavra em `4k + 4`, há quatro casos:
+
+| Caso | PC | Teste | Instrução entregue | Sobra |
+|---|---|---|---|---|
+| 1 | `4k` | `A_lo[1:0] = 11` | A inteira, 32 bits | nada |
+| 2 | `4k` | `A_lo[1:0] ≠ 11` | `A_lo`, 16 bits | `A_hi` vai para o buffer |
+| 3 | `4k + 2` | `A_hi[1:0] ≠ 11` | `A_hi`, 16 bits | nada |
+| 4 | `4k + 2` | `A_hi[1:0] = 11` | `{B_lo, A_hi}`, 32 bits; precisa de B | `B_hi` vai para o buffer |
+
+O IF tem um buffer de uma meia-palavra: 16 bits e um bit de validade. Regras:
+
+- Buffer vazio: o IF busca a palavra alinhada do PC e aplica o caso 1, 2, 3 ou 4. No caso 4 com buffer vazio, que só ocorre logo depois de um redirecionamento para um endereço `4k + 2`, `A_hi` vai para o buffer e B é buscada no ciclo seguinte: é a única situação em que uma instrução custa duas buscas, com uma bolha no ID.
+- Buffer cheio, com a metade alta da palavra anterior, que é a instrução no PC atual: se ela é de 16 bits, caso 3, o IF a entrega sem buscar nada e o buffer esvazia. Se ela é o começo de uma de 32 bits, caso 4, o IF busca a palavra seguinte, entrega `{B_lo, A_hi}` e guarda `B_hi` no buffer.
+- A busca é emitida no ciclo em que a instrução é necessária. Como a memória responde no mesmo ciclo do `ready` (seção 10), sem wait states o IF entrega uma instrução por ciclo ao ID em qualquer mistura de 16 e 32 bits, salvo a bolha do redirecionamento para `4k + 2` descrita acima. Esse é um requisito para a seção 5. Com wait states, cada busca para o IF pelos ciclos de espera; código comprimido busca metade das palavras e para menos.
+- Redirecionamento, por desvio tomado, `jal`, `jalr`, trap ou `mret`: o buffer é esvaziado e a busca recomeça na palavra alinhada do alvo. Se o alvo é `4k + 2`, a metade baixa da primeira palavra é descartada.
+- A segunda metade de uma instrução que cruza a fronteira é buscada pelas mesmas regras de qualquer busca; se cair fora do mapa, vale zero (seção 2). O linker nunca põe código na última meia-palavra da IMEM, mas o comportamento fica definido e o ISS busca do mesmo modo.
+
+### 8.3 Expansão e avanço do PC
+
+- O IF entrega ao ID a instrução e uma marca de tamanho, 16 ou 32 bits. Se é de 16 bits, o expansor, um bloco combinacional no ID, produz a forma de 32 bits da tabela de 8.1, e o decodificador normal segue a partir dela. A marca de tamanho acompanha a instrução pelo pipeline.
+- O PC seguinte em sequência é PC + 2 ou PC + 4 conforme o tamanho real. O valor de retorno de `c.jal` e `c.jalr`, gravado em `x1`, é PC + 2, embora a expansão seja `jal x1` e `jalr x1`: o estágio que calcula o retorno usa o tamanho real, não o da forma expandida. O mesmo tamanho real define `rvfi_pc_wdata` (seção 11).
+- Os deslocamentos de `c.j`, `c.jal`, `c.beqz` e `c.bnez` são relativos ao PC da instrução comprimida, e a expansão preserva o deslocamento; o alvo é PC + deslocamento, calculado no EX como para qualquer desvio. Com a extensão C ligada, todo alvo é múltiplo de 2, porque os deslocamentos são pares e `jalr` zera o bit 0: a exceção de código 0 nunca ocorre (seção 9.2).
+- `mepc` recebe o PC da instrução comprimida, que pode ser `4k + 2` (seção 9.1). `c.ebreak` gera a exceção de código 3 com `mtval` igual ao PC.
+
+### 8.4 Parâmetro `EN_C`
+
+Com `EN_C = 0` (seção 12): o buffer de busca e o expansor são removidos, cada palavra buscada é uma instrução, qualquer palavra com `[1:0] ≠ 11` é instrução ilegal, o PC é sempre múltiplo de 4, `mepc[1]` fica fixo em 0, e um desvio tomado ou salto para endereço que não é múltiplo de 4 gera a exceção de código 0 com `mtval` igual ao alvo (seção 9.2). Nessa configuração o núcleo é um RV32IMA completo. Se a extensão C for cortada (risco R2), o corte é uma mudança de escopo registrada na seção 3 de `docs/decisoes.md`, e a configuração de referência da seção 12.3 passa a ter `EN_C = 0`.
+
+### 8.5 Verificação
+
+A suíte `rv32uc` (M2.3), programas em C compilados com `-march=rv32imac_zicsr` executados até o fim, e, na M3.3, covergroups para instruções comprimidas, instruções de 32 bits que cruzam a fronteira, redirecionamento para alvo `4k + 2` com os casos 3 e 4, e cada codificação reservada da tabela gerando a exceção. O gerador de instruções aleatórias produz misturas de 16 e 32 bits com desvios para alvos `4k + 2`. O buffer de busca é a parte que o risco R2 aponta; é nela que a cobertura precisa ser mais fina.
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 9. CSRs e traps
 
@@ -713,3 +781,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.9 | 2026-11-16 | Lucas Lares | Seção 12: nove parâmetros de `core_top` e `soc_top` com padrões e restrições, nomes das instâncias e do vetor de memória, carga dos `.hex` pelo testbench por referência hierárquica, configuração de referência e regras para extensão desligada, multiplicador e ISS (D10). Seção 12 sem pendências. |
 | 0.10 | 2026-11-16 | Lucas Lares | Seção 6: multiplicação em um ciclo com um multiplicador de 33 × 33 para as quatro instruções, divisão com restauração de latência constante e stall, casos especiais da ISA, multiplicador próprio da `mac` (D11). Ajustes decorrentes em 4.2, 4.5 e 12.3. Seção 6 sem pendências. |
 | 0.11 | 2026-11-16 | Lucas Lares | Seção 7: codificação das onze instruções da extensão A, reserva de uma palavra invalidada só por `sc.w`, `amo*.w` em duas transações no MEM com ALU própria, `aq` e `rl` ignorados (D12). `lr.w` com `rs2` não nulo e codificações fora da tabela acrescentados aos ilegais da 9.2. Seção 7 sem pendências. |
+| 0.12 | 2026-11-16 | Lucas Lares | Seção 8: tabela das 26 instruções RV32C com equivalentes, imediatos, reservados e HINTs; busca com buffer de uma meia-palavra e os quatro casos de alinhamento; expansão em ID e avanço do PC pelo tamanho real; `EN_C = 0`; verificação (D13). Seção 8 sem pendências. |
