@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.9, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.10, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -197,7 +197,7 @@ Efeitos no pipeline. O plano (seção 4.1.3) deixou em aberto como a `mac` acess
 - O `ACC` fica na unidade custom, no estágio EX. A `mac` lê o `ACC` e o escreve na borda de relógio do mesmo ciclo em EX, então `mac` consecutivas se encadeiam sem forwarding nem stall.
 - Os acessos ao `ACC` pelas instruções Zicsr também executam em EX, em ordem de programa, logo não há hazard entre `csrw`, `csrr` e `mac` além do que a ordem do pipeline já garante.
 - A escrita do `ACC` obedece ao mesmo sinal de descarte que as demais escritas de estado: se a instrução em EX for anulada por flush ou por trap de uma instrução mais antiga (seção 9), o `ACC` não muda.
-- Requisito para a seção 6: a latência da `mac` é a da `mul`, e `mac` consecutivas nunca param. Com multiplicador de dois ciclos, a `mac` faz o produto no primeiro e a soma no `ACC` no segundo, em pipeline; nesse caso o valor de `rd` fica pronto um estágio depois, como um load, e a unidade de hazards o trata como load-use.
+- Requisito para a seção 6, atendido: a latência da `mac` é a da `mul`, um ciclo (seção 6.1), e `mac` consecutivas nunca param. A unidade `Xqnn` tem o próprio multiplicador, de 32 × 32 para 32 bits (seção 6.3). A alternativa com multiplicador de dois ciclos, em que a `mac` faria o produto no primeiro e a soma no `ACC` no segundo e `rd` ficaria pronto um estágio depois, como um load, foi descartada em D11.
 - Motivo da escolha e alternativas descartadas: D3.
 
 ### 4.3 `sat`: saturação
@@ -262,7 +262,7 @@ rd ← rs1    caso contrário
 
 ### 4.5 Efeitos no pipeline e uso conjunto
 
-`sat` e `relu` executam no estágio EX em um ciclo, como uma operação da ALU, e escrevem `rd` pelo caminho normal de WB. Participam do forwarding como qualquer R-type. `mac`, `sat` e `relu` em sequência, cada uma consumindo o resultado da anterior, encadeiam sem stall quando a `mac` é de um ciclo; com a `mac` de dois ciclos (seção 6), a `sat` logo após ela sofre o stall de load-use descrito em 4.2.
+`sat` e `relu` executam no estágio EX em um ciclo, como uma operação da ALU, e escrevem `rd` pelo caminho normal de WB. Participam do forwarding como qualquer R-type. `mac`, `sat` e `relu` em sequência, cada uma consumindo o resultado da anterior, encadeiam sem stall: a `mac` é de um ciclo (seção 6).
 
 Requantização de uma saída de camada int8, com o acumulado em `t0`, o deslocamento em `t1` e `t2 = 8`:
 
@@ -290,13 +290,54 @@ A decidir:
 
 ## 6. Extensão M
 
-Multiplicação (`mul`, `mulh`, `mulhsu`, `mulhu`) e divisão (`div`, `divu`, `rem`, `remu`): latência de cada operação, se há stall, e os casos especiais de divisão por zero e overflow conforme a especificação RISC-V.
+Define as oito instruções da extensão M, `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem` e `remu`: latência, stall, casos especiais e a relação com o multiplicador da `mac`. Habilitada por `EN_M` (seção 12); com `EN_M = 0`, as oito são instrução ilegal (seção 9). Decisão D11 em `docs/decisoes.md`, com as alternativas descartadas.
 
-A decidir:
+### 6.1 Multiplicação
 
-- Multiplicador em 1 ou 2 ciclos.
-- Divisor multiciclo com stall: número de ciclos.
-- Se o multiplicador é compartilhado com a `mac` ou se a unidade custom tem o próprio.
+| Instrução | `rd` | Extensão de `rs1` | Extensão de `rs2` |
+|---|---|---|---|
+| `mul` | produto, bits 31:0 | indiferente | indiferente |
+| `mulh` | produto, bits 63:32 | com sinal | com sinal |
+| `mulhsu` | produto, bits 63:32 | com sinal | sem sinal |
+| `mulhu` | produto, bits 63:32 | sem sinal | sem sinal |
+
+- Um ciclo, no estágio EX, combinacional como a ALU. O resultado participa do forwarding como o de qualquer R-type; não há hazard novo nem stall.
+- Implementação: um só multiplicador com sinal de 33 × 33 bits. Cada operando é estendido para 33 bits conforme a tabela, bit 32 igual ao bit 31 quando "com sinal" e zero quando "sem sinal"; os 64 bits baixos do produto de 66 bits servem às quatro instruções, e o `funct3` escolhe a extensão e a metade que sai. Em Verilog, o operador `*` sobre operandos `signed` de 33 bits: o simulador calcula direto e a síntese infere o multiplicador.
+- Não há fusão de `mulh` seguida de `mul`, que a ISA sugere como otimização; cada instrução executa sozinha em um ciclo.
+- Motivo do ciclo único, e limitação conhecida: o projeto não tem alvo de síntese (seção 1). Um multiplicador de 32 bits em um ciclo é o caminho combinacional mais longo do núcleo e limitaria a frequência num chip ou FPGA; uma versão sintetizada teria de revisitar esta decisão, provavelmente com um multiplicador em dois ciclos tratado como load-use pela unidade de hazards.
+
+### 6.2 Divisão
+
+| Instrução | `rd` | Sinal |
+|---|---|---|
+| `div` | quociente, arredondado para zero | com sinal |
+| `divu` | quociente | sem sinal |
+| `rem` | resto, com o sinal do dividendo | com sinal |
+| `remu` | resto | sem sinal |
+
+Casos especiais, definidos pela ISA, sem exceção:
+
+| Caso | `div` | `divu` | `rem` | `remu` |
+|---|---|---|---|---|
+| `rs2 = 0` | `0xFFFF_FFFF`, isto é −1 | `0xFFFF_FFFF` | `rs1` | `rs1` |
+| `rs1 = −2^31` e `rs2 = −1` | `0x8000_0000`, isto é −2^31 | não se aplica | 0 | não se aplica |
+
+- Multiciclo com stall, no estágio EX: a instrução fica no EX enquanto o divisor trabalha; IF, ID e EX param, e MEM e WB terminam o que tinham (seção 5). Ao fim do stall o resultado entra no forwarding e no WB como o de qualquer R-type.
+- Latência constante, independente dos operandos, inclusive na divisão por zero e no overflow: toda divisão ocupa o EX pelo mesmo número de ciclos, no máximo 40. O valor exato é documentado em `rtl/README.md` e medido na M4.4. Não há saída antecipada.
+- Implementação: divisão com restauração, um bit do quociente por ciclo, 32 iterações sobre os módulos dos operandos, com conserto de sinal no fim: quociente negativo se os sinais diferem, resto com o sinal do dividendo. Com divisor zero, a iteração sem sinal dá naturalmente quociente `0xFFFF_FFFF` e resto igual ao dividendo, que é o resultado de `divu` e `remu`; o overflow com sinal também sai certo pelo conserto de sinal, porque `0x8000_0000 ÷ 1` dá `0x8000_0000` e negá-lo dá o mesmo valor. A divisão por zero com sinal é o único caso tratado à parte: o conserto de sinal transformaria o −1 em 1.
+- O RTL não usa os operadores `/` e `%` do Verilog, que gerariam um divisor combinacional; eles só aparecem no testbench e no ISS.
+- A divisão não é interrompível: nada mais novo pode descartar a instrução em EX, e nada mais velho pode gerar trap, porque o trap é tomado no EX (seção 9.3). Um wait state da memória durante a divisão só prolonga o stall.
+
+### 6.3 Multiplicador da `mac`
+
+A unidade `Xqnn` tem o próprio multiplicador, de 32 × 32 bits para 32 bits, só a metade baixa do produto, que é tudo de que a `mac` precisa (seção 4.2). Ele não é compartilhado com o multiplicador de 6.1. Consequências:
+
+- `EN_M = 0` com `EN_XQNN = 1` funciona sem regra especial: cada unidade instancia o que usa (seção 12.3).
+- A `mac` tem a latência da `mul`, um ciclo, e `mac` consecutivas encadeiam sem stall, como a seção 4.2 exige; `sat` e `relu` logo após a `mac` também não param (seção 4.5).
+- Um defeito no multiplicador de uma unidade não mascara a outra. Como `mac` com `ACC = 0` e `mul` devem dar os mesmos 32 bits baixos (seção 4.2), comparar as duas é um teste barato que localiza qual multiplicador errou.
+- Compartilhar o multiplicador é a otimização óbvia para uma versão sintetizada e fica anotada em D11.
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 7. Extensão A
 
@@ -612,7 +653,7 @@ As memórias não carregam arquivo nenhum sozinhas e não leem a linha de comand
 
 - Configuração de referência: a da coluna "Padrão", com todas as extensões ligadas, 64 KiB e 128 KiB, reset em `0x0000_0000` e zero wait states. É a configuração da demonstração (M4.4), da regressão principal (M3.4) e da versão congelada `rtl-v1.0` (M2.5). As demais combinações têm de funcionar; o plano de verificação da M3.3 decide quais entram na regressão e com que profundidade, e no mínimo entram `EN_C = 0` (risco R2) e wait states diferentes de zero (seção 10).
 - Extensão desligada: vale a seção 9.5. A instrução de uma extensão desligada é decodificada como instrução ilegal, com `mtval` igual aos bits da instrução, e o `misa` reflete os parâmetros (seção 9.1).
-- Multiplicador: se a seção 6 compartilhar o multiplicador entre `mul` e `mac`, ele existe sempre que `EN_M = 1` ou `EN_XQNN = 1`. `EN_M = 0` não pode retirar o multiplicador de que a `mac` precisa.
+- Multiplicador: cada unidade tem o seu (seção 6.3). O multiplicador de 33 × 33 da extensão M existe com `EN_M = 1`; o de 32 × 32 da `mac` existe com `EN_XQNN = 1`. `EN_M = 0` não afeta a `mac`.
 - Latência do multiplicador e do divisor: escolha de projeto fixada na seção 6, não parâmetro. Parametrizá-la dobraria os casos de verificação do caminho mais delicado do pipeline.
 - ISS: tudo que muda o comportamento visível ao programa, `RESET_VECTOR`, `EN_M`, `EN_A`, `EN_C`, `EN_XQNN`, `IMEM_SIZE` e `DMEM_SIZE`, é configurável no ISS com o mesmo significado e os mesmos padrões; a sintaxe da linha de comando é da M3.2. Wait states não entram, porque não mudam o comportamento arquitetural.
 - Nomenclatura: parâmetros em maiúsculas com sublinhado; sinais, módulos e instâncias em minúsculas com sublinhado, como nas seções 10 e 11.
@@ -632,3 +673,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.7 | 2026-11-16 | Lucas Lares | Seção 9: mecanismo de trap em modo máquina tomado no EX, tabela de CSRs, exceções com códigos e `mtval`, `mret`, contadores e instruções de sistema (D8). Fechados os itens que dependiam da 9 nas seções 2, 4, 8, 10, 11 e 12; as seções 2, 4, 9, 10 e 11 ficam sem pendências. |
 | 0.8 | 2026-11-16 | Lucas Lares | Seções 1 e 3: escopo com o que está dentro e fora, parâmetros, conformidade e ordem de corte, extensão custom nomeada `Xqnn`; reset com banco zerado e tabela de estado; término pelo `tohost` com o núcleo continuando e o fim no retire do store (D9). Seções 1 e 3 sem pendências. |
 | 0.9 | 2026-11-16 | Lucas Lares | Seção 12: nove parâmetros de `core_top` e `soc_top` com padrões e restrições, nomes das instâncias e do vetor de memória, carga dos `.hex` pelo testbench por referência hierárquica, configuração de referência e regras para extensão desligada, multiplicador e ISS (D10). Seção 12 sem pendências. |
+| 0.10 | 2026-11-16 | Lucas Lares | Seção 6: multiplicação em um ciclo com um multiplicador de 33 × 33 para as quatro instruções, divisão com restauração de latência constante e stall, casos especiais da ISA, multiplicador próprio da `mac` (D11). Ajustes decorrentes em 4.2, 4.5 e 12.3. Seção 6 sem pendências. |
