@@ -4,7 +4,7 @@ Contrato entre o núcleo em RTL (`rtl/`), o modelo de referência (`model/`), o 
 
 Responsável: Lucas Lares (A). Revisão: Pedro Piccichelli (B) e Lucas Teixeira (C). Aprovação: os três integrantes e o orientador. A cada versão aprovada é criada a tag `spec-vX.Y` na `main` (ver `docs/convencoes.md`, seção 5). Mudanças depois da 1.0 seguem a seção 7.1 do plano de trabalho e são registradas em `docs/decisoes.md`.
 
-Última atualização: 2026-11-16. Situação: rascunho, versão 0.10, não aprovada.
+Última atualização: 2026-11-16. Situação: rascunho, versão 0.11, não aprovada.
 
 Convenção deste documento: cada seção começa dizendo o que define e termina com a lista "A decidir", com os pontos ainda abertos. Quando uma seção não tiver mais nada em "A decidir", ela está pronta para revisão.
 
@@ -341,13 +341,51 @@ A decidir: nada. Seção pronta para revisão.
 
 ## 7. Extensão A
 
-`lr.w` e `sc.w` com reserva, e as operações atômicas de memória (`amoswap`, `amoadd`, `amoxor`, `amoand`, `amoor`, `amomin`, `amomax`, `amominu`, `amomaxu`). Como a reserva é mantida e invalidada e como a sequência leitura-modificação-escrita é feita no estágio MEM.
+Define as onze instruções da extensão A sobre palavras de 32 bits, `lr.w`, `sc.w` e as nove `amo*.w`: codificação, semântica da reserva, a sequência leitura-modificação-escrita no estágio MEM e os bits `aq` e `rl`. Habilitada por `EN_A` (seção 12); com `EN_A = 0`, as onze são instrução ilegal (seção 9). Num sistema de um só mestre, sem cache e com escritas visíveis no ciclo seguinte (seção 10), a atomicidade é automática; o que esta seção fixa é o comportamento exato, para RTL e ISS coincidirem. Decisão D12 em `docs/decisoes.md`, com as alternativas descartadas.
 
-A decidir:
+### 7.1 Codificação
 
-- Granularidade da reserva (endereço exato ou bloco) e o que a invalida.
-- Número de ciclos de stall da sequência leitura-modificação-escrita.
-- Bits `aq` e `rl`: ignorados (núcleo em ordem, sem cache) ou com algum efeito.
+Todas usam o opcode `0101111` (AMO) e `funct3 = 010`; `rs1` é o endereço, `rs2` o dado e `rd` o destino. Os bits 31:27, `funct5`, escolhem a operação; os bits 26 (`aq`) e 25 (`rl`) são ignorados (7.4).
+
+| Instrução | `funct5` | `rd` recebe | A memória recebe |
+|---|---|---|---|
+| `lr.w rd, (rs1)` | `00010` | `mem[rs1]` | nada; registra a reserva (7.2). O campo `rs2` tem de ser `00000`; outro valor é instrução ilegal (seção 9.2). |
+| `sc.w rd, rs2, (rs1)` | `00011` | 0 se escreveu, 1 se não | `rs2`, só com reserva válida para `rs1` (7.2) |
+| `amoswap.w rd, rs2, (rs1)` | `00001` | `mem[rs1]` | `rs2` |
+| `amoadd.w` | `00000` | `mem[rs1]` | a soma de `mem[rs1]` e `rs2`, módulo 2^32 |
+| `amoxor.w` | `00100` | `mem[rs1]` | ou exclusivo bit a bit de `mem[rs1]` e `rs2` |
+| `amoand.w` | `01100` | `mem[rs1]` | e bit a bit |
+| `amoor.w` | `01000` | `mem[rs1]` | ou bit a bit |
+| `amomin.w` | `10000` | `mem[rs1]` | o menor entre `mem[rs1]` e `rs2`, com sinal |
+| `amomax.w` | `10100` | `mem[rs1]` | o maior, com sinal |
+| `amominu.w` | `11000` | `mem[rs1]` | o menor, sem sinal |
+| `amomaxu.w` | `11100` | `mem[rs1]` | o maior, sem sinal |
+
+Endereço: `rs1` tem de ser múltiplo de 4. Desalinhado, `lr.w` gera a exceção de load desalinhado, código 4, e `sc.w` e `amo*.w` a de store ou AMO desalinhado, código 6 (seção 9.2), detectadas no EX antes de qualquer transação. Qualquer `funct5` fora da tabela, ou `funct3` diferente de `010`, é instrução ilegal.
+
+### 7.2 Reserva de `lr.w` e `sc.w`
+
+A reserva é um registrador dentro da lógica de memória do núcleo: um bit de validade e o endereço da palavra, `addr[31:2]`. A granularidade é exatamente uma palavra.
+
+- `lr.w` lê a palavra, como um `lw`, e registra a reserva em `rs1[31:2]`, substituindo qualquer reserva anterior.
+- `sc.w` tem sucesso se a reserva é válida e `rs1[31:2]` é igual ao endereço reservado. Com sucesso, escreve `rs2` numa transação comum com `dbus_be = 1111` e `rd` recebe 0. Sem sucesso, não emite transação e `rd` recebe 1. Nos dois casos a reserva é invalidada.
+- Nada mais invalida a reserva: nem trap, nem `mret`, nem escritas do próprio núcleo na palavra reservada por `sw`, `sh`, `sb` ou `amo*.w`, nem leituras. Só `sc.w` e o reset (seção 3), em que ela nasce inválida. É o mínimo que a ISA exige; o que ela permite a mais, invalidar em trap ou em escrita própria, foi descartado em D12.
+- Consequência num sistema de um mestre: a `sc.w` que segue um `lr.w` no mesmo endereço, sem outro `sc.w` entre os dois, sempre tem sucesso. A falha ocorre quando o endereço difere do reservado, quando houve `sc.w` no meio ou quando não houve `lr.w` desde o reset. A suíte `rv32ua` testa a falha por endereço diferente.
+
+### 7.3 Sequência leitura-modificação-escrita das `amo*.w`
+
+- Uma `amo*.w` ocupa o estágio MEM por duas transações consecutivas na porta de dados, no mesmo endereço: primeiro uma leitura, `dbus_we = 0` e `dbus_be = 1111`, depois uma escrita, `dbus_we = 1` e `dbus_be = 1111`, com o resultado da operação. Entre as duas, uma ALU própria do estágio MEM, com as nove operações da tabela, calcula o valor a escrever a partir do dado lido e de `rs2`.
+- Com zero wait states são dois ciclos no MEM em vez de um: IF, ID e EX param um ciclo a mais do que num load, e WB termina o que tinha. Cada wait state da memória prolonga o stall do mesmo modo (seção 10). A latência é fixa: não depende da operação nem dos dados.
+- `rd` recebe o valor lido, pelo caminho normal de WB. Com `rd = x0` a escrita em `rd` é descartada, mas a memória é atualizada.
+- A sequência não é interrompível: o desalinhamento foi checado no EX, o trap é tomado no EX (seção 9.3) e nenhuma instrução mais nova pode descartar a que está no MEM. O escravo vê duas transações comuns (seção 10.1); não há sinal de exclusividade.
+- Uma `amo*.w` em endereço de periférico (seção 2) funciona como leitura seguida de escrita; não tem uso previsto.
+- Trace: `rvfi_mem_rmask` e `rvfi_mem_wmask` em `1111`, `rvfi_mem_rdata` com o valor lido, `rvfi_mem_wdata` com o valor escrito e `rvfi_rd_wdata` igual ao lido (seção 11, regra 5).
+
+### 7.4 Bits `aq` e `rl`
+
+`aq`, de acquire, e `rl`, de release, pedem que acessos posteriores à atômica não passem à frente dela e que acessos anteriores não fiquem para depois. O núcleo executa todos os acessos em ordem de programa e cada escrita vale no ciclo seguinte (seção 10, regra 7), sem cache nem buffer de escrita: as duas garantias já valem sempre. Os bits são ignorados: as quatro combinações decodificam para a mesma operação, sem exceção. Continuam visíveis em `rvfi_insn`.
+
+A decidir: nada. Seção pronta para revisão.
 
 ## 8. Extensão C
 
@@ -396,7 +434,7 @@ Regras de acesso:
 | Código em `mcause` | Exceção | Quando o núcleo a gera | `mtval` |
 |---|---|---|---|
 | 0 | Endereço de instrução desalinhado | Só com a extensão C desligada: desvio condicional tomado, `jal` ou `jalr` cujo alvo não é múltiplo de 4. A exceção é da instrução de desvio ou salto. Com C ligada nunca ocorre: `jalr` zera o bit 0 do alvo e todo deslocamento é múltiplo de 2. | O alvo |
-| 2 | Instrução ilegal | Codificação que não é de RV32I, da Zicsr, de uma extensão habilitada (M, A, C, custom) nem das instruções de 9.5; codificação reservada do `custom-0` (seção 4.1); instrução de extensão desligada por parâmetro; acesso a CSR inexistente ou escrita em CSR só de leitura; e as palavras `0x0000_0000` e `0xFFFF_FFFF`, que a ISA define como ilegais. | Os bits da instrução: 32 bits para uma instrução de 32 bits; para uma comprimida, os 16 bits em `[15:0]` com `[31:16] = 0`, como em `rvfi_insn`. |
+| 2 | Instrução ilegal | Codificação que não é de RV32I, da Zicsr, de uma extensão habilitada (M, A, C, custom) nem das instruções de 9.5; codificação reservada do `custom-0` (seção 4.1); `lr.w` com o campo `rs2` diferente de zero e qualquer `funct5` ou `funct3` fora da tabela da seção 7.1 no opcode AMO; instrução de extensão desligada por parâmetro; acesso a CSR inexistente ou escrita em CSR só de leitura; e as palavras `0x0000_0000` e `0xFFFF_FFFF`, que a ISA define como ilegais. | Os bits da instrução: 32 bits para uma instrução de 32 bits; para uma comprimida, os 16 bits em `[15:0]` com `[31:16] = 0`, como em `rvfi_insn`. |
 | 3 | Breakpoint | `ebreak` e `c.ebreak`. | O PC do `ebreak` |
 | 4 | Load desalinhado | `lw` e `lr.w` com `addr[1:0]` diferente de `00`; `lh` e `lhu` com `addr[0] = 1` (seção 10.3). | O endereço |
 | 6 | Store ou AMO desalinhado | `sw`, `sc.w` e `amo*.w` com `addr[1:0]` diferente de `00`; `sh` com `addr[0] = 1`. | O endereço |
@@ -674,3 +712,4 @@ A decidir: nada. Seção pronta para revisão.
 | 0.8 | 2026-11-16 | Lucas Lares | Seções 1 e 3: escopo com o que está dentro e fora, parâmetros, conformidade e ordem de corte, extensão custom nomeada `Xqnn`; reset com banco zerado e tabela de estado; término pelo `tohost` com o núcleo continuando e o fim no retire do store (D9). Seções 1 e 3 sem pendências. |
 | 0.9 | 2026-11-16 | Lucas Lares | Seção 12: nove parâmetros de `core_top` e `soc_top` com padrões e restrições, nomes das instâncias e do vetor de memória, carga dos `.hex` pelo testbench por referência hierárquica, configuração de referência e regras para extensão desligada, multiplicador e ISS (D10). Seção 12 sem pendências. |
 | 0.10 | 2026-11-16 | Lucas Lares | Seção 6: multiplicação em um ciclo com um multiplicador de 33 × 33 para as quatro instruções, divisão com restauração de latência constante e stall, casos especiais da ISA, multiplicador próprio da `mac` (D11). Ajustes decorrentes em 4.2, 4.5 e 12.3. Seção 6 sem pendências. |
+| 0.11 | 2026-11-16 | Lucas Lares | Seção 7: codificação das onze instruções da extensão A, reserva de uma palavra invalidada só por `sc.w`, `amo*.w` em duas transações no MEM com ALU própria, `aq` e `rl` ignorados (D12). `lr.w` com `rs2` não nulo e codificações fora da tabela acrescentados aos ilegais da 9.2. Seção 7 sem pendências. |
