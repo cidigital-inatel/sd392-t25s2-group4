@@ -77,7 +77,7 @@ Gestão e documentação inicial:
 
 - [ ] `[GES]` Preencher o plano de trabalho: nomes dos três membros, orientador, colaboradores, parágrafo "situação preliminar já alcançada", link do repositório.
 - [ ] `[GES]` M1.3 · Matriz de responsabilidades e dependências (a tabela acima, ajustada), aprovada pelos três.
-- [x] `[GES]` Criar o repositório no GitHub, com as pastas `rtl/`, `tb/`, `model/`, `sw/`, `docs/`: `https://github.com/lucaslaress/riscv-rv32imac-ci-digital` (privado).
+- [x] `[GES]` Criar o repositório no GitHub, com as pastas `rtl/`, `tb/`, `model/`, `sw/`, `docs/`. Repositório oficial: `https://github.com/cidigital-inatel/sd392-t25s2-group4`, da organização do curso, criado pelo orientador; o pessoal `lucaslaress/riscv-rv32imac-ci-digital`, onde a especificação foi escrita, foi descontinuado em 2026-11-16, com o histórico incorporado ao oficial (D15).
 - [x] `[GES]` Convidar os membros B e C como colaboradores do repositório.
 - [ ] `[GES]` Combinar entre os membros a convenção de commits, tags e issues (proposta em `docs/convencoes.md`).
 - [x] `[DOC]` Criar `docs/decisoes.md` com três tabelas: decisões tomadas, riscos (copiar a tabela 7.4 do plano e acompanhar) e mudanças de escopo.
