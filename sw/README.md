@@ -13,4 +13,12 @@ Conteúdo previsto no plano, por meta:
 
 Compilação: toolchain xPack `riscv-none-elf-gcc` com `-march=rv32imac_zicsr -mabi=ilp32` (instalação em `docs/ambiente.md`, seção 4). A codificação gerada para as instruções custom é sempre conferida com `objdump -d`.
 
-Subpastas: a definir na M4.1.
+Subpastas previstas e iniciadas:
+
+- `mnist/`: modelo de IA e aplicação MNIST (M4.3/M4.4);
+- `common/`: inicialização e componentes compartilhados bare-metal (M4.1);
+- `tests/`: programas de teste e suíte adaptada `riscv-tests` (M4.1);
+- `intrinsics/`: biblioteca e testes das instruções customizadas (M4.2);
+- `bench/`: micro-benchmarks (M4.4).
+
+As frentes ainda não iniciadas serão criadas conforme o checklist.
