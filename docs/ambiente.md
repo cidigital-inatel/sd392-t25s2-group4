@@ -213,7 +213,7 @@ Verificação, com o ambiente ativado:
 python -c "import torch, torchvision, numpy; print(torch.__version__, torchvision.__version__, numpy.__version__)"
 ```
 
-Deve imprimir as três versões. Anote-as na tabela de versões da seção 9. Na etapa M4.3, gere também o arquivo de versões exatas com `pip freeze > requirements.txt` dentro da pasta do modelo, para que outra máquina instale o mesmo conjunto com `pip install -r requirements.txt`.
+Deve imprimir as três versões. Anote-as na tabela de versões da seção 9. Na etapa M4.3, gere também o arquivo de versões exatas com `pip freeze > requirements.txt` dentro de `sw/mnist/`, para que outra máquina instale o mesmo conjunto com `pip install -r requirements.txt`.
 
 Não é instalação: a suíte `riscv-tests` (testes de conformidade da ISA) é código-fonte copiado para dentro de `sw/` e adaptado ao núcleo na etapa M4.1; entra pelo fluxo de software, não por este guia.
 
