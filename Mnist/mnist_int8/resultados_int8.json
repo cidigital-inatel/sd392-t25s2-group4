@@ -1,0 +1,15 @@
+{
+  "imagens_teste": 10000,
+  "imagens_calibracao": 1024,
+  "acertos_float32": 9837,
+  "acertos_int8": 9833,
+  "acuracia_float32": 0.9837,
+  "acuracia_int8": 0.9833,
+  "concordancia": 0.9993,
+  "delta_pontos_percentuais": -0.0400000000000067,
+  "limites_acc_int32": [
+    94044,
+    326908,
+    1433726
+  ]
+}
